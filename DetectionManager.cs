@@ -37,6 +37,7 @@ public sealed class DetectionManager : BackgroundService
     private readonly ComskipRunner _runner;
     private readonly DetectionStore _store;
     private readonly RecordingChannelCache _channelCache;
+    private readonly LiveScanCoordinator _liveScanCoordinator;
 
     private readonly Channel<Guid> _queue =
         Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions { SingleReader = false });
@@ -65,7 +66,8 @@ public sealed class DetectionManager : BackgroundService
         IServiceProvider serviceProvider,
         ComskipRunner runner,
         DetectionStore store,
-        RecordingChannelCache channelCache)
+        RecordingChannelCache channelCache,
+        LiveScanCoordinator liveScanCoordinator)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -73,6 +75,7 @@ public sealed class DetectionManager : BackgroundService
         _runner = runner;
         _store = store;
         _channelCache = channelCache;
+        _liveScanCoordinator = liveScanCoordinator;
     }
 
     private static PluginConfiguration Config =>
@@ -197,15 +200,31 @@ public sealed class DetectionManager : BackgroundService
         }
 
         _deferrals.TryRemove(itemId, out _);
-        _logger.LogInformation("Running Comskip on {Path}", item.Path);
 
-        var result = await _runner.RunAsync(
-            cfg.ComskipPath,
-            cfg.ComskipIniPath,
-            cfg.WorkDirectory,
-            item.Path,
-            cfg.PerFileTimeoutMinutes,
-            ct).ConfigureAwait(false);
+        // If a live Comskip process has been tailing this recording since it started
+        // (see LiveScanStarter / LiveScanCoordinator), harvest whatever it already
+        // produced instead of scanning the whole finished file over again. Not gated on
+        // the current EnableLiveScanStart value — a no-op if nothing is tracked, and
+        // correctly still benefits from a job started before the setting was toggled off
+        // mid-recording, rather than wasting it.
+        var harvestedEdlPath = _liveScanCoordinator.TryHarvest(item.Path);
+
+        ComskipRunResult result;
+        if (harvestedEdlPath is not null)
+        {
+            result = new ComskipRunResult(ComskipOutcome.Ran, harvestedEdlPath, string.Empty);
+        }
+        else
+        {
+            _logger.LogInformation("Running Comskip on {Path}", item.Path);
+            result = await _runner.RunAsync(
+                cfg.ComskipPath,
+                cfg.ComskipIniPath,
+                cfg.WorkDirectory,
+                item.Path,
+                cfg.PerFileTimeoutMinutes,
+                ct).ConfigureAwait(false);
+        }
 
         if (result.Outcome == ComskipOutcome.Failed || result.EdlPath is null)
         {

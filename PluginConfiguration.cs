@@ -51,6 +51,23 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool ProcessRecordingsAutomatically { get; set; } = true;
 
     /// <summary>
+    /// Start a live-tuned Comskip process the moment a recording begins, instead of
+    /// waiting until it finishes, so the post-recording scan just reads whatever that
+    /// process already produced instead of scanning the whole file from scratch. This
+    /// needs <c>live_tv=1</c> and <c>output_edl=1</c> set in the configured comskip.ini
+    /// (the latter is already required for normal detection to work at all) — without
+    /// <c>live_tv=1</c>, Comskip may exit early or misbehave against a file that's still
+    /// growing. Trade-off: because the live process is killed (not gracefully stopped)
+    /// once the recording settles, its analysis may trail the true end of the recording
+    /// by a few seconds, so a break right at the very end could be missed; this is the
+    /// same reason live TV playback itself can never show marks in real time (see
+    /// <see cref="Jellyfin.Plugin.ComskipSegments.Detection.LiveScanStarter"/>). Doubles
+    /// CPU load while a recording is in progress — leave off on modest hardware unless
+    /// instant post-recording marks matter enough to pay for it.
+    /// </summary>
+    public bool EnableLiveScanStart { get; set; }
+
+    /// <summary>
     /// How often, in hours, the "Scan library for commercials (Comskip)" task runs on
     /// its own as a safety net for recordings the live-event watcher misses (Jellyfin
     /// raises ItemUpdated rather than ItemAdded when a recording finishes over an

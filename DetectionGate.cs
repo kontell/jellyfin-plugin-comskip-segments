@@ -35,19 +35,52 @@ public static class DetectionGate
         out string reason,
         Func<BaseItem, string, ChannelResolver.ChannelInfo?> resolveChannel)
     {
-        reason = string.Empty;
-
-        var path = item.Path;
-        if (string.IsNullOrEmpty(path))
-        {
-            reason = "item has no file path";
-            return false;
-        }
-
         var seriesName = (item as Episode)?.SeriesName;
         if (string.IsNullOrWhiteSpace(seriesName))
         {
             seriesName = item.Name;
+        }
+
+        return ShouldAutoDetectCore(item.Path, seriesName, () => resolveChannel(item, seriesName!), cfg, out reason);
+    }
+
+    /// <summary>
+    /// Same gate, for a DVR recording that is still being written and so has no library
+    /// item yet — used by
+    /// <see cref="Jellyfin.Plugin.ComskipSegments.Detection.LiveScanStarter"/> to decide
+    /// whether to bother starting a live Comskip process at all. The channel is already
+    /// known directly from the in-progress recording, so there's no cache/guide lookup to
+    /// make lazy here (unlike the overload above).
+    /// </summary>
+    public static bool ShouldAutoDetectForInProgressRecording(
+        string? path,
+        string? seriesOrShowName,
+        string? channelName,
+        string? channelNumber,
+        PluginConfiguration cfg,
+        out string reason)
+    {
+        ChannelResolver.ChannelInfo? channel =
+            string.IsNullOrWhiteSpace(channelName) && string.IsNullOrWhiteSpace(channelNumber)
+                ? null
+                : new ChannelResolver.ChannelInfo(channelName, channelNumber);
+
+        return ShouldAutoDetectCore(path, seriesOrShowName, () => channel, cfg, out reason);
+    }
+
+    private static bool ShouldAutoDetectCore(
+        string? path,
+        string? seriesName,
+        Func<ChannelResolver.ChannelInfo?> resolveChannel,
+        PluginConfiguration cfg,
+        out string reason)
+    {
+        reason = string.Empty;
+
+        if (string.IsNullOrEmpty(path))
+        {
+            reason = "item has no file path";
+            return false;
         }
 
         var candidates = Candidates(path, seriesName);
@@ -71,7 +104,7 @@ public static class DetectionGate
         var channelBlock = Patterns(cfg.ChannelBlockList);
         if (channelAllow.Count > 0 || channelBlock.Count > 0)
         {
-            var channel = resolveChannel(item, seriesName!);
+            var channel = resolveChannel();
             var channelCandidates = new List<string>();
             if (!string.IsNullOrWhiteSpace(channel?.Name))
             {

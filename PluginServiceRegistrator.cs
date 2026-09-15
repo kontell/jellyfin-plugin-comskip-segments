@@ -21,6 +21,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RecordingChannelCache>();
         serviceCollection.AddHostedService<LiveRecordingChannelPoller>();
         serviceCollection.AddSingleton<ComskipRunner>();
+        serviceCollection.AddSingleton<LiveScanCoordinator>();
+        serviceCollection.AddHostedService<LiveScanStarter>();
 
         // DetectionManager is both a singleton (so the provider/watcher/task can enqueue
         // into it) AND the hosted service that runs the worker loop. Register the singleton

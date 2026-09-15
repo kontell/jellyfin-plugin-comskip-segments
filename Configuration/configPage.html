@@ -78,6 +78,16 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h2>Live scanning (experimental)</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Start a second, live-tuned Comskip process the moment a recording begins, instead of waiting until it finishes, so the post-recording scan is near-instant. Requires <code>live_tv=1</code> and <code>output_edl=1</code> in your comskip.ini (output_edl is already required either way). Doubles CPU load for the duration of every recording, and because the live process is stopped (not gracefully) once the recording settles, a break right at the very end of the recording can occasionally be missed. Leave off unless instant post-recording marks are worth the extra CPU.</div>
+
+                    <label class="checkboxContainer">
+                        <input id="EnableLiveScanStart" name="EnableLiveScanStart" type="checkbox" is="emby-checkbox" />
+                        <span>Start Comskip while the recording is still in progress</span>
+                    </label>
+                </div>
+
+                <div class="verticalSection">
                     <h2>Show / folder filter</h2>
                     <div class="fieldDescription" style="margin-bottom:1em;">Limit which recordings automatic detection runs on. Each line is matched against the series name, the file name, and every folder in the path. <code>*</code> and <code>?</code> wildcards work; a line with no wildcard must match in full (case-insensitive). Manual runs of the scan task ignore these lists.</div>
 
@@ -195,6 +205,7 @@
                 page.querySelector("#EnableBackstopScan").checked = config.EnableBackstopScan !== false;
                 page.querySelector("#AutoScanIntervalHours").value = config.AutoScanIntervalHours != null ? config.AutoScanIntervalHours : 6;
                 page.querySelector("#EnableMediaSegmentScanEnqueue").checked = config.EnableMediaSegmentScanEnqueue !== false;
+                page.querySelector("#EnableLiveScanStart").checked = !!config.EnableLiveScanStart;
                 page.querySelector("#SeriesAllowList").value = config.SeriesAllowList || "";
                 page.querySelector("#SeriesBlockList").value = config.SeriesBlockList || "";
                 page.querySelector("#ChannelAllowList").value = config.ChannelAllowList || "";
@@ -309,6 +320,7 @@
                         var autoScan = parseFloat(page.querySelector("#AutoScanIntervalHours").value);
                         config.AutoScanIntervalHours = isNaN(autoScan) || autoScan < 0 ? 0 : autoScan;
                         config.EnableMediaSegmentScanEnqueue = page.querySelector("#EnableMediaSegmentScanEnqueue").checked;
+                        config.EnableLiveScanStart = page.querySelector("#EnableLiveScanStart").checked;
                         config.SeriesAllowList = page.querySelector("#SeriesAllowList").value;
                         config.SeriesBlockList = page.querySelector("#SeriesBlockList").value;
                         config.ChannelAllowList = page.querySelector("#ChannelAllowList").value;
