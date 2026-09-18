@@ -124,6 +124,20 @@ public static class DetectionGate
                 return false;
             }
 
+            // Fail CLOSED, not open, when a block-list is configured but the channel
+            // can't be determined at all (RecordingChannelCache entries expire after 2
+            // days, and the by-name guide fallback returns nothing once a show ages out
+            // of "recently aired" — confirmed happening live: an HBO recording correctly
+            // skipped right after it finished slipped through a backstop scan run days
+            // later once both lookups had gone cold). Risking a scan on an excluded
+            // channel is worse than occasionally skipping one that would have passed.
+            if (channelBlock.Count > 0 && channel is null)
+            {
+                reason = "channel could not be determined and a channel block-list is set; " +
+                    "treating as blocked rather than risk scanning a channel meant to be excluded";
+                return false;
+            }
+
             var blockedChannel = channelBlock.FirstOrDefault(p => channelCandidates.Any(c => Matches(p, c)));
             if (blockedChannel is not null)
             {

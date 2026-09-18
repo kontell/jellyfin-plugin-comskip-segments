@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ComskipSegments.AudioTrim;
 using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Jellyfin.Plugin.ComskipSegments.Configuration;
 using MediaBrowser.Controller.Entities;
@@ -38,6 +39,7 @@ public sealed class DetectionManager : BackgroundService
     private readonly DetectionStore _store;
     private readonly RecordingChannelCache _channelCache;
     private readonly LiveScanCoordinator _liveScanCoordinator;
+    private readonly AudioTrimService _audioTrim;
 
     private readonly Channel<Guid> _queue =
         Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions { SingleReader = false });
@@ -67,7 +69,8 @@ public sealed class DetectionManager : BackgroundService
         ComskipRunner runner,
         DetectionStore store,
         RecordingChannelCache channelCache,
-        LiveScanCoordinator liveScanCoordinator)
+        LiveScanCoordinator liveScanCoordinator,
+        AudioTrimService audioTrim)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -76,6 +79,7 @@ public sealed class DetectionManager : BackgroundService
         _store = store;
         _channelCache = channelCache;
         _liveScanCoordinator = liveScanCoordinator;
+        _audioTrim = audioTrim;
     }
 
     private static PluginConfiguration Config =>
@@ -201,13 +205,50 @@ public sealed class DetectionManager : BackgroundService
 
         _deferrals.TryRemove(itemId, out _);
 
+        // Audio-format trim runs BEFORE Comskip, and only as part of the automatic
+        // pipeline here (the manual item-menu/config-page path calls AudioTrimService
+        // directly). Running it first means Comskip always scans the FINAL file, so the
+        // resulting break timestamps are correct from the start — no separate
+        // invalidate-and-rerun step is needed for this, first-run, path.
+        var audioTrimApplied = false;
+        if (cfg.EnableAudioFormatTrim && cfg.AudioTrimAutomaticApply)
+        {
+            try
+            {
+                var trimResult = await _audioTrim.ApplyIfNeededAsync(item, cfg, force: false, ct).ConfigureAwait(false);
+                if (trimResult.Trimmed)
+                {
+                    audioTrimApplied = true;
+                    _logger.LogInformation(
+                        "Audio-format trim applied automatically to {Path} (-{Lead:F1}s lead, -{Trail:F1}s trail) before commercial detection",
+                        item.Path, trimResult.LeadTrimSeconds, trimResult.TrailTrimSeconds);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Automatic audio-format trim failed for {Path}; continuing with commercial detection on the original file", item.Path);
+            }
+        }
+
         // If a live Comskip process has been tailing this recording since it started
         // (see LiveScanStarter / LiveScanCoordinator), harvest whatever it already
         // produced instead of scanning the whole finished file over again. Not gated on
         // the current EnableLiveScanStart value — a no-op if nothing is tracked, and
         // correctly still benefits from a job started before the setting was toggled off
         // mid-recording, rather than wasting it.
+        //
+        // Always called even when a trim just ran (never skipped outright) — TryHarvest
+        // is also what kills/untracks the live process for this path; skipping it would
+        // leave that job running against an already-finished recording for up to
+        // LiveScanCoordinator's 12-hour stale ceiling. Its result IS discarded in that
+        // case: the live process tailed the ORIGINAL, pre-trim bytes, so its EDL's
+        // offsets no longer line up with the file now sitting at this path.
         var harvestedEdlPath = _liveScanCoordinator.TryHarvest(item.Path);
+        if (audioTrimApplied && harvestedEdlPath is not null)
+        {
+            _logger.LogInformation("Discarding live-harvested EDL for {Path}: audio-trim shifted the timeline, forcing a fresh scan", item.Path);
+            harvestedEdlPath = null;
+        }
 
         ComskipRunResult result;
         if (harvestedEdlPath is not null)

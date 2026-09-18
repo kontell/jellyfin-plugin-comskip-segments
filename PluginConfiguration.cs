@@ -131,7 +131,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <see cref="Jellyfin.Plugin.ComskipSegments.Detection.ChannelResolver"/>), which
     /// works in a normal broadcast lineup where a given show always airs on the same
     /// channel but returns nothing for a show with no recent guide coverage (treated as
-    /// "channel unknown", which fails an allow-list closed). Skipped entirely when both
+    /// "channel unknown", which fails BOTH this allow-list and <see cref="ChannelBlockList"/>
+    /// closed — an unresolved channel is never treated as passing either filter, even
+    /// though only an empty allow-list literally requires a match; see the block-list's
+    /// own remarks for why that matters just as much there). Skipped entirely when both
     /// channel lists are empty, the default. Manual/forced runs ignore this list.
     /// </summary>
     public string ChannelAllowList { get; set; } = string.Empty;
@@ -140,6 +143,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Optional DVR channel block-list, one entry per line. Automatic detection never
     /// runs on a recording from a matching channel. Applied after the channel
     /// allow-list. Same matching rules as <see cref="ChannelAllowList"/>.
+    ///
+    /// Fails CLOSED (blocked), not open, when this list is non-empty but the channel
+    /// can't be resolved at all — confirmed live: an HBO recording correctly skipped
+    /// right after it finished recording (channel caught by the live poller) later got
+    /// auto-scanned anyway by the periodic backstop scan, days after the channel-cache
+    /// entry had expired and the by-name guide fallback had gone cold, because an
+    /// earlier version treated "channel unknown" as "allow it through" for a block-list
+    /// specifically. An unresolved channel is now never treated as passing this filter.
     /// </summary>
     public string ChannelBlockList { get; set; } = string.Empty;
 
@@ -175,4 +186,61 @@ public class PluginConfiguration : BasePluginConfiguration
     /// into a folder this plugin doesn't otherwise touch.
     /// </summary>
     public bool PlaceEdlBesideRecording { get; set; }
+
+    /// <summary>
+    /// Master switch for the audio-format trim feature. Some broadcast recordings open
+    /// (and/or close) with a different audio channel layout than the movie itself — e.g. a
+    /// network preview/bumper block in 2.0 stereo before a movie broadcast in 5.1, or a few
+    /// minutes of the tail end of the PREVIOUS program in 5.1 caught by DVR pre-roll padding
+    /// before the actual 2.0 bumper starts. Because ffprobe (and so Jellyfin) determines a
+    /// file's audio channel count by probing from the start, that leading junk makes the
+    /// whole recording get read as 2.0 even though the movie itself is 5.1. When on, this
+    /// scans the primary audio stream's channel layout across the whole file and can cut the
+    /// non-movie audio format off each end. Off by default: unlike commercial-skip segments
+    /// (which only mark playback ranges), this can rewrite the actual recording file.
+    /// </summary>
+    public bool EnableAudioFormatTrim { get; set; }
+
+    /// <summary>
+    /// When <see cref="EnableAudioFormatTrim"/> is also on, apply the trim automatically as
+    /// part of the normal post-recording pipeline (same trigger as Comskip). When off (the
+    /// default), detection/trimming only ever happens from an explicit per-item action —
+    /// either the "Fix opening/closing audio format" item-details menu entry, or the config
+    /// page's manual trim button — so you can build confidence in the detector against your
+    /// own channels before letting it touch files unattended.
+    /// </summary>
+    public bool AudioTrimAutomaticApply { get; set; }
+
+    /// <summary>
+    /// True (default): keep the untouched original alongside the corrected file (renamed to
+    /// <c>&lt;name&gt;.original&lt;ext&gt;</c> in the same folder) so a bad trim can be
+    /// undone by hand. False: delete the original once the corrected file is verified in
+    /// place, saving disk space immediately.
+    /// </summary>
+    public bool AudioTrimKeepOriginal { get; set; } = true;
+
+    /// <summary>
+    /// The contiguous audio-format run that contains the temporal midpoint of the recording
+    /// is treated as "the movie" (this correctly survives DVR pre-roll padding starting
+    /// mid-way through the tail of a previous, differently-formatted program — see README).
+    /// Everything outside that run is a trim candidate, but only if that core run covers at
+    /// least this fraction of the total recording; otherwise the file is treated as
+    /// ambiguous and left untouched rather than guessing.
+    /// </summary>
+    public double AudioTrimMinCoreFraction { get; set; } = 0.7;
+
+    /// <summary>
+    /// Leading/trailing non-movie audio shorter than this is left alone — not worth the risk
+    /// of a re-mux for a couple of seconds of junk, and a cheap guard against a spurious
+    /// one-frame blip being mistaken for a real format boundary.
+    /// </summary>
+    public double AudioTrimMinJunkSeconds { get; set; } = 5.0;
+
+    /// <summary>
+    /// Safety margin subtracted from each measured cut point (i.e. less is trimmed than was
+    /// actually measured), so a slightly imprecise boundary — or ffmpeg's keyframe-rounded
+    /// seek — never has a chance to clip real movie content. The trade-off is a few extra
+    /// seconds of junk audio left in place.
+    /// </summary>
+    public double AudioTrimPaddingSeconds { get; set; } = 1.5;
 }

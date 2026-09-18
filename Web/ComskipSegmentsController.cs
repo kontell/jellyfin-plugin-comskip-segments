@@ -121,6 +121,43 @@ public sealed class ComskipSegmentsController : ControllerBase
         return Ok(new DetectResponse(force, message));
     }
 
+    public sealed record ClearResponse(bool Cleared, string Message);
+
+    /// <summary>
+    /// Wipes an item's published commercial-skip segments and stored detection record
+    /// WITHOUT re-enqueueing — unlike <see cref="Detect"/> with Force checked, which
+    /// clears and then unconditionally re-scans, bypassing the show/channel gate as a
+    /// side effect. Useful when a result was produced by something that shouldn't have
+    /// run in the first place (a stale channel-cache entry, a manually-forced action)
+    /// and you want it gone without immediately reproducing it. The item becomes
+    /// eligible for a normal, gate-respecting automatic re-detect afterward, same as any
+    /// item with no stored record.
+    /// </summary>
+    [HttpPost("Clear/{itemId}")]
+    public async Task<ActionResult<ClearResponse>> Clear([FromRoute] Guid itemId, CancellationToken cancellationToken)
+    {
+        var item = _libraryManager.GetItemById(itemId);
+        if (item is null)
+        {
+            return NotFound(new ClearResponse(false, $"No library item with ID {itemId}"));
+        }
+
+        try
+        {
+            var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
+            await segmentManager.DeleteSegmentsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not clear published segments for {ItemId}", itemId);
+            return Ok(new ClearResponse(false, $"Could not clear published segments: {ex.Message}"));
+        }
+
+        _store.Remove(itemId);
+        _logger.LogInformation("Manually cleared commercial-skip segments and detection record for {Path}", item.Path);
+        return Ok(new ClearResponse(true, "Cleared. No re-scan was queued."));
+    }
+
     [HttpGet("Status/{itemId}")]
     public ActionResult<StatusResponse> Status([FromRoute] Guid itemId)
     {

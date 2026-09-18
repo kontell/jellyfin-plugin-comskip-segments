@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.ComskipSegments.AudioTrim;
 using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.Events;
@@ -23,6 +24,11 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ComskipRunner>();
         serviceCollection.AddSingleton<LiveScanCoordinator>();
         serviceCollection.AddHostedService<LiveScanStarter>();
+
+        serviceCollection.AddSingleton<AudioChannelScanner>();
+        serviceCollection.AddSingleton<RecordingTrimmer>();
+        serviceCollection.AddSingleton<AudioTrimStore>();
+        serviceCollection.AddSingleton<AudioTrimService>();
 
         // DetectionManager is both a singleton (so the provider/watcher/task can enqueue
         // into it) AND the hosted service that runs the worker loop. Register the singleton

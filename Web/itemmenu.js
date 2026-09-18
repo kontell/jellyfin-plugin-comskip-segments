@@ -1,11 +1,13 @@
 /*
- * Comskip Commercial Segments — item-details "Scan for commercials" menu entry.
+ * Comskip Commercial Segments — item-details action-sheet menu entries:
+ *   1. "Scan for commercials" (comskip-scan)
+ *   2. "Fix opening/closing audio format" (audiotrim-apply)
  *
  * Injected into jellyfin-web's index.html (see Web/install-overlay.sh, same mechanism
  * as the playback overlay). jellyfin-web has no plugin extension point for the item
  * details page's "..." action sheet, so this watches the DOM for that menu opening and
- * appends a matching button to it — same markup/classes jellyfin-web's own menu items
- * use, so it looks native.
+ * appends matching buttons to it — same markup/classes jellyfin-web's own menu items
+ * use, so they look native.
  *
  * VERSION-SENSITIVE FILE — built against this server's Jellyfin 12.0.0 web client.
  * Confirmed live via DOM inspection on 2026-09-11:
@@ -29,19 +31,16 @@
  * can reliably learn which item the open menu belongs to (nothing in the action sheet's
  * own DOM identifies it).
  *
- * Always force-runs (ignores show/channel filters and any existing result) — same
- * one-click-does-something expectation as jellyfin-web's own "Refresh metadata" entry
- * right next to it, and the only way this button is ever useful for something already
- * marked complete. No confirmation prompt, for the same reason "Refresh metadata"
- * doesn't have one — if you don't want that, use the config page's Detect button without
- * Force checked instead.
+ * Both entries always force-run (ignore show/channel filters and any existing result) —
+ * same one-click-does-something expectation as jellyfin-web's own "Refresh metadata"
+ * entry right next to them. No confirmation prompt for the same reason "Refresh
+ * metadata" doesn't have one: the click IS the confirmation. The audio-trim entry is a
+ * bigger action (it can rewrite the recording file, not just mark a skip range) but is
+ * itself gated server-side by the "Enable audio-format trim" master switch in plugin
+ * settings, which returns an explanatory error instead of running when off.
  */
 (function () {
   'use strict';
-
-  var MENU_ITEM_DATA_ID = 'comskip-scan';
-  var ICON_CLASS =
-    'actionsheetMenuItemIcon listItemIcon listItemIcon-transparent material-icons content_cut';
 
   var isAdminPromise = null;
 
@@ -83,7 +82,7 @@
     return new URLSearchParams(hash.slice(qIndex + 1)).get('id');
   }
 
-  function runScan(itemId, button) {
+  function runComskipScan(itemId, button) {
     var apiClient = window.ApiClient;
     button.disabled = true;
     apiClient.ajax({
@@ -99,20 +98,43 @@
     });
   }
 
-  function buildMenuItem(itemId) {
+  function runAudioTrim(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'POST',
+      url: apiClient.getUrl('ComskipSegments/AudioTrim/Apply/' + itemId),
+      dataType: 'json'
+    }).then(function (r) {
+      if (r && r.Trimmed) {
+        notify(
+          'Audio trimmed: removed ' + r.LeadTrimSeconds.toFixed(1) + 's from the start and '
+          + r.TrailTrimSeconds.toFixed(1) + 's from the end.'
+        );
+      } else {
+        notify((r && r.Message) || 'Nothing to trim.');
+      }
+    }).catch(function () {
+      notify('Audio-trim request failed — check the item still exists, you have permission, and the feature is enabled in plugin settings.');
+    }).then(function () {
+      button.disabled = false;
+    });
+  }
+
+  function buildMenuItem(dataId, iconName, label, onClick) {
     var button = document.createElement('button');
     button.setAttribute('is', 'emby-button');
     button.type = 'button';
     button.className = 'listItem listItem-button actionSheetMenuItem emby-button';
-    button.setAttribute('data-id', MENU_ITEM_DATA_ID);
+    button.setAttribute('data-id', dataId);
 
     var icon = document.createElement('span');
-    icon.className = ICON_CLASS;
+    icon.className = 'actionsheetMenuItemIcon listItemIcon listItemIcon-transparent material-icons ' + iconName;
     icon.setAttribute('aria-hidden', 'true');
 
     var bodyText = document.createElement('div');
     bodyText.className = 'listItemBodyText actionSheetItemText';
-    bodyText.textContent = 'Scan for commercials';
+    bodyText.textContent = label;
 
     var body = document.createElement('div');
     body.className = 'listItemBody actionsheetListItemBody';
@@ -121,26 +143,87 @@
     button.appendChild(icon);
     button.appendChild(body);
 
-    button.addEventListener('click', function (e) {
-      e.stopPropagation();
-      runScan(itemId, button);
+    // No stopPropagation() here — see the note above the MENU_ITEMS array
+    // for why letting the click bubble is what actually closes the sheet.
+    button.addEventListener('click', function () {
+      onClick(button);
     });
 
     return button;
   }
 
+  /*
+   * Root-caused live via devtools, in three stages:
+   *
+   * 1. Originally called e.stopPropagation() here, on the assumption that
+   *    jellyfin-web's own click handling on the action sheet would otherwise
+   *    try to interpret our data-id ("comskip-scan"/"audiotrim-apply",
+   *    neither of which it recognizes) as one of its own known actions. That
+   *    assumption was never actually verified and turned out to be the bug:
+   *    it also blocked whatever closes the sheet, so ours hung open after a
+   *    click while every native item dismissed normally (reported: "it
+   *    doesn't disappear after you select either it or the commercial skip
+   *    option").
+   *
+   * 2. Tried to close it ourselves instead: an Escape keydown did nothing,
+   *    and — more fundamentally — NO synthetic click/mousedown/pointerdown
+   *    dispatched via JS closed it either, even targeting the exact
+   *    `.dialogBackdrop.dialogBackdropOpened` element directly, while a real
+   *    OS-level click at the same coordinates closed it instantly. Browsers
+   *    don't let scripts fake a trusted user gesture (`Event.isTrusted`),
+   *    and this dismiss handler evidently requires one — no JS-only
+   *    workaround exists. Directly removing the dialog/backdrop elements
+   *    ourselves "worked" visually but left the action sheet's OWN
+   *    open/close bookkeeping desynced from the DOM — confirmed live: every
+   *    later attempt to open ANY action sheet on the page silently did
+   *    nothing for the rest of that page load. Worse than the original bug.
+   *
+   * 3. The actual fix: clicking a NATIVE item that doesn't open a follow-up
+   *    dialog (e.g. "Copy Stream URL", which just copies to the clipboard
+   *    and shows a toast — functionally identical in shape to our two
+   *    buttons) closes the sheet too. So closing happens generically on any
+   *    item click via normal event bubbling, which our own
+   *    stopPropagation() had been blocking the whole time. Removing it
+   *    fixes the hang with zero side effects — confirmed live end to end,
+   *    including the real audio-trim network call, toast, and a clean
+   *    reopen of a fresh action sheet right afterward.
+   */
+
+  var MENU_ITEMS = [
+    {
+      dataId: 'comskip-scan',
+      icon: 'content_cut',
+      label: 'Scan for commercials',
+      run: runComskipScan
+    },
+    {
+      dataId: 'audiotrim-apply',
+      icon: 'graphic_eq',
+      label: 'Fix opening/closing audio format',
+      run: runAudioTrim
+    }
+  ];
+
   function tryInject(scroller) {
     var itemId = getCurrentItemId();
-    if (!itemId || scroller.querySelector('[data-id="' + MENU_ITEM_DATA_ID + '"]')) {
+    if (!itemId) {
       return;
     }
 
     checkIsAdmin().then(function (isAdmin) {
-      if (!isAdmin || scroller.querySelector('[data-id="' + MENU_ITEM_DATA_ID + '"]')) {
-        return; // not an admin, or another mutation callback already added it
+      if (!isAdmin) {
+        return;
       }
 
-      scroller.appendChild(buildMenuItem(itemId));
+      MENU_ITEMS.forEach(function (entry) {
+        if (scroller.querySelector('[data-id="' + entry.dataId + '"]')) {
+          return; // already injected (this callback can fire more than once per open)
+        }
+
+        scroller.appendChild(buildMenuItem(entry.dataId, entry.icon, entry.label, function (button) {
+          entry.run(itemId, button);
+        }));
+      });
     });
   }
 

@@ -106,7 +106,7 @@
 
                 <div class="verticalSection">
                     <h2>Channel filter</h2>
-                    <div class="fieldDescription" style="margin-bottom:1em;">Limit which DVR channels automatic detection runs on. The channel is captured by polling Jellyfin every 20 seconds for whatever is currently recording (the only way to catch it — it's gone from Jellyfin once a recording finishes). For anything recorded before this was turned on, it falls back to a by-name lookup against the recently-aired program guide, which works in a normal broadcast lineup but returns nothing (treated as unknown, which an allow-list rejects) for a show with no recent guide coverage. Skipped entirely when both lists below are empty. Each line is matched against the channel name and the channel number; <code>*</code>/<code>?</code> wildcards work the same as the show/folder filter above.</div>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Limit which DVR channels automatic detection runs on. The channel is captured by polling Jellyfin every 20 seconds for whatever is currently recording (the only way to catch it — it's gone from Jellyfin once a recording finishes) and cached for 2 days. For anything recorded before this was turned on, or once that cache entry has aged out, it falls back to a by-name lookup against the recently-aired program guide, which works in a normal broadcast lineup but returns nothing for a show with no recent guide coverage. Either way, an unresolved channel is treated as failing BOTH lists below (never passes the allow-list, always matches the block-list) — a block-listed premium channel is never scanned just because its channel couldn't be determined days later. Skipped entirely when both lists below are empty. Each line is matched against the channel name and the channel number; <code>*</code>/<code>?</code> wildcards work the same as the show/folder filter above.</div>
 
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="ChannelAllowList">Allow-list</label>
@@ -141,7 +141,65 @@
                     <button id="DetectStatusBtn" type="button" is="emby-button" class="raised block">
                         <span>Check status</span>
                     </button>
+                    <button id="ClearBtn" type="button" is="emby-button" class="raised block">
+                        <span>Clear result (no re-scan)</span>
+                    </button>
+                    <div class="fieldDescription">Wipes this item's published segments and stored record without queuing a new scan — unlike a forced run above, which clears and then immediately re-scans, bypassing the show/channel filters as a side effect. Use this to remove a result that shouldn't have been produced (e.g. a channel-cache entry that expired before a backstop scan ran).</div>
                     <div id="DetectResult" class="fieldDescription" style="margin-top:0.5em;white-space:pre-line;"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2>Audio format trim</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Some broadcast recordings open (and/or close) with a different audio channel layout than the movie itself — e.g. a network preview/bumper block in 2.0 stereo before a movie broadcast in 5.1. Because Jellyfin determines a file's audio channel count by probing from the start, that leading junk makes the whole recording read as 2.0 even though the movie is 5.1. This scans the primary audio stream across the whole file, finds the channel-format run that contains the recording's own midpoint (correctly surviving DVR pre-roll padding that starts mid-way through a differently-formatted previous program), and can cut whatever's outside that run. Unlike commercial-skip segments, this can rewrite the recording file — off by default.</div>
+
+                    <label class="checkboxContainer">
+                        <input id="EnableAudioFormatTrim" name="EnableAudioFormatTrim" type="checkbox" is="emby-checkbox" />
+                        <span>Enable audio-format trim</span>
+                    </label>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Master switch. Off disables both the automatic pipeline below AND the "Fix opening/closing audio format" item-details menu entry / manual button below.</div>
+
+                    <label class="checkboxContainer">
+                        <input id="AudioTrimAutomaticApply" name="AudioTrimAutomaticApply" type="checkbox" is="emby-checkbox" />
+                        <span>Apply automatically as recordings finish</span>
+                    </label>
+                    <div class="fieldDescription" style="margin-bottom:1em;">When on, runs as part of the normal post-recording pipeline (same trigger as Comskip), before commercial detection. When off, trimming only ever happens from an explicit per-item click — build confidence in the detector against your own channels first.</div>
+
+                    <label class="checkboxContainer">
+                        <input id="AudioTrimKeepOriginal" name="AudioTrimKeepOriginal" type="checkbox" is="emby-checkbox" />
+                        <span>Keep the original file as a backup</span>
+                    </label>
+                    <div class="fieldDescription">Renames the untouched original to <code>&lt;name&gt;.original&lt;ext&gt;</code> next to the corrected file instead of deleting it. Turn off to free the disk space immediately once you trust the result.</div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AudioTrimMinCoreFraction">Minimum core fraction</label>
+                        <input id="AudioTrimMinCoreFraction" name="AudioTrimMinCoreFraction" type="number" min="0.5" max="0.99" step="0.01" is="emby-input" />
+                        <div class="fieldDescription">The channel-format run at the recording's midpoint must cover at least this fraction of the total duration, or the file is left untouched as ambiguous. 0.7 = 70%.</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AudioTrimMinJunkSeconds">Minimum junk length (seconds)</label>
+                        <input id="AudioTrimMinJunkSeconds" name="AudioTrimMinJunkSeconds" type="number" min="0" step="0.5" is="emby-input" />
+                        <div class="fieldDescription">Leading/trailing non-movie audio shorter than this is left alone — not worth a re-mux for a couple of seconds.</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AudioTrimPaddingSeconds">Safety padding (seconds)</label>
+                        <input id="AudioTrimPaddingSeconds" name="AudioTrimPaddingSeconds" type="number" min="0" step="0.1" is="emby-input" />
+                        <div class="fieldDescription">Subtracted from each measured cut point so a slightly imprecise boundary never clips real movie content. Trade-off: this much extra junk audio is left in place.</div>
+                    </div>
+
+                    <div class="inputContainer" style="margin-top:1em;">
+                        <label class="inputLabel inputLabelUnfocused" for="AudioTrimItemId">Item ID</label>
+                        <input id="AudioTrimItemId" name="AudioTrimItemId" type="text" is="emby-input" placeholder="e.g. 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d" />
+                    </div>
+
+                    <button id="AudioTrimApplyBtn" type="button" is="emby-button" class="raised block" style="margin-top:0.5em;">
+                        <span>Scan &amp; trim now</span>
+                    </button>
+                    <button id="AudioTrimStatusBtn" type="button" is="emby-button" class="raised block">
+                        <span>Check status</span>
+                    </button>
+                    <div id="AudioTrimResult" class="fieldDescription" style="margin-top:0.5em;white-space:pre-line;"></div>
                 </div>
 
                 <div class="verticalSection">
@@ -216,6 +274,12 @@
                 page.querySelector("#PaddingSeconds").value = config.PaddingSeconds || 0;
                 page.querySelector("#CleanupWorkFiles").checked = !!config.CleanupWorkFiles;
                 page.querySelector("#PlaceEdlBesideRecording").checked = !!config.PlaceEdlBesideRecording;
+                page.querySelector("#EnableAudioFormatTrim").checked = !!config.EnableAudioFormatTrim;
+                page.querySelector("#AudioTrimAutomaticApply").checked = !!config.AudioTrimAutomaticApply;
+                page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal !== false;
+                page.querySelector("#AudioTrimMinCoreFraction").value = config.AudioTrimMinCoreFraction != null ? config.AudioTrimMinCoreFraction : 0.7;
+                page.querySelector("#AudioTrimMinJunkSeconds").value = config.AudioTrimMinJunkSeconds != null ? config.AudioTrimMinJunkSeconds : 5;
+                page.querySelector("#AudioTrimPaddingSeconds").value = config.AudioTrimPaddingSeconds != null ? config.AudioTrimPaddingSeconds : 1.5;
             }
 
             document.querySelector("#ComskipSegmentsConfigPage")
@@ -305,6 +369,84 @@
                 });
             });
 
+            document.querySelector("#ClearBtn").addEventListener("click", function () {
+                var itemId = currentItemId();
+                var out = document.querySelector("#DetectResult");
+                if (!itemId) {
+                    out.textContent = "Enter an item ID first.";
+                    return;
+                }
+                out.textContent = "Clearing...";
+                ApiClient.ajax({
+                    type: "POST",
+                    url: ApiClient.getUrl("ComskipSegments/Clear/" + itemId),
+                    dataType: "json"
+                }).then(function (r) {
+                    out.textContent = r.Message || (r.Cleared ? "Cleared." : "Not cleared.");
+                }).catch(function () {
+                    out.textContent = "Clear request failed (bad item ID?).";
+                });
+            });
+
+            function currentAudioTrimItemId() {
+                return (document.querySelector("#AudioTrimItemId").value || "").trim();
+            }
+
+            document.querySelector("#AudioTrimApplyBtn").addEventListener("click", function () {
+                var itemId = currentAudioTrimItemId();
+                var out = document.querySelector("#AudioTrimResult");
+                if (!itemId) {
+                    out.textContent = "Enter an item ID first.";
+                    return;
+                }
+                out.textContent = "Scanning...";
+                ApiClient.ajax({
+                    type: "POST",
+                    url: ApiClient.getUrl("ComskipSegments/AudioTrim/Apply/" + itemId),
+                    dataType: "json"
+                }).then(function (r) {
+                    if (r.Trimmed) {
+                        out.textContent = "Trimmed: -" + r.LeadTrimSeconds.toFixed(1) + "s lead, -" + r.TrailTrimSeconds.toFixed(1) + "s trail.\n" + r.Message;
+                    } else {
+                        out.textContent = (r.Attempted ? "No trim applied: " : "Not attempted: ") + r.Message;
+                    }
+                }).catch(function () {
+                    out.textContent = "Request failed (bad item ID, item has no file on disk, or the feature is disabled above).";
+                });
+            });
+
+            document.querySelector("#AudioTrimStatusBtn").addEventListener("click", function () {
+                var itemId = currentAudioTrimItemId();
+                var out = document.querySelector("#AudioTrimResult");
+                if (!itemId) {
+                    out.textContent = "Enter an item ID first.";
+                    return;
+                }
+                ApiClient.ajax({
+                    type: "GET",
+                    url: ApiClient.getUrl("ComskipSegments/AudioTrim/Status/" + itemId),
+                    dataType: "json"
+                }).then(function (r) {
+                    var lines = [];
+                    lines.push("Last result: " + (r.Status || "none yet"));
+                    if (r.LeadTrimSeconds != null) {
+                        lines.push("Lead/trail trimmed: " + r.LeadTrimSeconds.toFixed(1) + "s / " + r.TrailTrimSeconds.toFixed(1) + "s");
+                    }
+                    if (r.BackupPath) {
+                        lines.push("Original backed up at: " + r.BackupPath);
+                    }
+                    if (r.Message) {
+                        lines.push(r.Message);
+                    }
+                    if (r.UpdatedUtc) {
+                        lines.push("Updated: " + new Date(r.UpdatedUtc).toLocaleString());
+                    }
+                    out.textContent = lines.join("\n");
+                }).catch(function () {
+                    out.textContent = "Status request failed.";
+                });
+            });
+
             document.querySelector("#ComskipSegmentsConfigForm")
                 .addEventListener("submit", function (e) {
                     e.preventDefault();
@@ -331,6 +473,15 @@
                         config.PaddingSeconds = parseFloat(page.querySelector("#PaddingSeconds").value) || 0;
                         config.CleanupWorkFiles = page.querySelector("#CleanupWorkFiles").checked;
                         config.PlaceEdlBesideRecording = page.querySelector("#PlaceEdlBesideRecording").checked;
+                        config.EnableAudioFormatTrim = page.querySelector("#EnableAudioFormatTrim").checked;
+                        config.AudioTrimAutomaticApply = page.querySelector("#AudioTrimAutomaticApply").checked;
+                        config.AudioTrimKeepOriginal = page.querySelector("#AudioTrimKeepOriginal").checked;
+                        var minCoreFraction = parseFloat(page.querySelector("#AudioTrimMinCoreFraction").value);
+                        config.AudioTrimMinCoreFraction = isNaN(minCoreFraction) ? 0.7 : minCoreFraction;
+                        var minJunkSeconds = parseFloat(page.querySelector("#AudioTrimMinJunkSeconds").value);
+                        config.AudioTrimMinJunkSeconds = isNaN(minJunkSeconds) ? 5 : minJunkSeconds;
+                        var trimPadding = parseFloat(page.querySelector("#AudioTrimPaddingSeconds").value);
+                        config.AudioTrimPaddingSeconds = isNaN(trimPadding) ? 1.5 : trimPadding;
 
                         ApiClient.updatePluginConfiguration(pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);
