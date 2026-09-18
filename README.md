@@ -20,6 +20,20 @@ wired for Jellyfin's media-segment system.
 - **Read recordings, write a work dir.** Comskip is always invoked with an explicit
   `--output` work directory the service account owns; the read-only recordings folder is
   never written to.
+- **Audio-format trim is the deliberate exception to that.** Some broadcast recordings
+  open (and/or close) with a different audio channel layout than the movie itself — e.g.
+  a network preview/bumper block in 2.0 stereo before a movie broadcast in 5.1 — which
+  makes the whole file read as 2.0 even though the movie is 5.1, because Jellyfin probes
+  audio format from the start of the file. `AudioTrim/AudioChannelScanner.cs` decodes the
+  primary audio stream's per-frame channel count across the whole file via `ffprobe` and
+  groups it into contiguous runs; the run containing the recording's own temporal midpoint
+  is treated as the movie (this is what correctly survives DVR pre-roll padding that
+  starts mid-way through a differently-formatted previous program, rather than just
+  trusting whatever's at t=0). `AudioTrim/RecordingTrimmer.cs` then cuts everything
+  outside that run with `ffmpeg -c copy` in the work directory first, and only once that
+  output passes a sanity check does it swap the result into the recording's own path —
+  the one place this plugin does write into the recordings folder, and only when this
+  feature is explicitly turned on. Off by default; see "Audio format trim" below.
 
 ## Build
 
@@ -65,6 +79,32 @@ Dashboard → Plugins → **Comskip Commercial Segments** → set the paths → 
 **Test paths**. This checks them *as the service account*, which catches the
 `/home` traversal and systemd-sandbox (`ProtectHome`) cases the browser can't see.
 
+### Browser overlay & item-menu buttons (optional, separate step)
+
+The seek-bar commercial-marker overlay and the two item-details `...` menu entries
+("Scan for commercials" and "Fix opening/closing audio format") are **not** wired up
+just by installing the plugin DLL above — they're browser-side scripts that have to be
+loaded by jellyfin-web's `index.html`, which the plugin can't patch itself (that file is
+root-owned; the plugin runs as the `jellyfin` service account):
+
+```
+sudo Web/install-overlay.sh
+# or, if your web root isn't the default /usr/share/jellyfin/web:
+sudo Web/install-overlay.sh /path/to/jellyfin-web/index.html
+```
+
+Safe to re-run any time (each patch checks its own marker comment and only inserts if
+missing). **Re-run it after every `jellyfin-web` package upgrade** — that package
+overwrites `index.html` wholesale, silently dropping the patch. If that happens, the
+plugin's own startup log will warn with "web patch is missing at ...". Hard-refresh the
+browser tab after (re)running it.
+
+Both menu entries only ever appear for users with the administrator role — regular
+accounts never see them, regardless of this patch. "Fix opening/closing audio format"
+also always appears once the patch is applied, even when **Enable audio-format trim**
+is off in settings; clicking it just returns a "disabled in plugin settings" message in
+that case rather than being hidden outright.
+
 ## Use
 
 - **DVR:** leave "Automatically detect commercials on new recordings" on. New recordings
@@ -74,6 +114,42 @@ Dashboard → Plugins → **Comskip Commercial Segments** → set the paths → 
 
 Skip behavior (Auto vs Ask) is Jellyfin's own setting, per user, under playback
 preferences — this plugin only supplies the segments.
+
+### Manual re-detect / clearing a bad result
+
+The config page's "Manual re-detect" section (item ID + buttons) covers three cases for
+one item at a time:
+
+- **Run detection**, Force checked: clears any existing result and segments, then
+  re-scans — bypassing the show/channel allow/block lists, same as a forced action
+  everywhere else in this plugin.
+- **Check status**: shows the stored result without changing anything.
+- **Clear result (no re-scan)**: wipes the published segments and stored record only —
+  no re-scan is queued. Use this when a result was produced by something that shouldn't
+  have run in the first place (most commonly: a channel-cache entry that expired before
+  a later automatic pass picked the item up anyway), where a forced re-run would just
+  reproduce the same unwanted result.
+
+### Audio format trim
+
+Off by default (**Enable audio-format trim** in plugin settings). Once on, you can run
+it two ways:
+
+- **Automatically:** turn on **Apply automatically as recordings finish** too. Runs as
+  part of the normal post-recording pipeline, before Comskip, so break timestamps come
+  out correct against the final file from the start.
+- **Per item, manually:** leave automatic apply off and either click **"Fix
+  opening/closing audio format"** in an item's `...` action-sheet menu, or use the "Audio
+  format trim" section's item-ID field and buttons on the plugin's config page. Good way
+  to build confidence in the detector against your own channels before trusting it
+  unattended. If Comskip had already published commercial-skip segments for that item,
+  a trim that cuts anything off the front invalidates their timestamps — this is detected
+  and handled automatically (segments cleared, then a normal, gate-respecting Comskip
+  re-detect is queued — so a block-listed channel that a trim just touched stays
+  block-listed rather than getting silently re-scanned as a side effect).
+
+**Keep the original file as a backup** (on by default) renames the untouched original to
+`<name>.original<ext>` next to the corrected file instead of deleting it.
 
 ## The one file to watch
 
@@ -107,7 +183,6 @@ be updated together, or Option A installs above break:
 
 - Duration sanity check (compare EDL end vs. `ffprobe` duration) to flag truncated
   recordings distinctly from clean short ones.
-- Optional remux/cut path if you ever want removal rather than skip markers.
 - Retry backoff/scheduling for `Failed` items.
 
 ## Repo metadata
