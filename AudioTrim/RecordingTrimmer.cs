@@ -110,6 +110,15 @@ public sealed class RecordingTrimmer
         psi.ArgumentList.Add("copy");
         psi.ArgumentList.Add("-avoid_negative_ts");
         psi.ArgumentList.Add("make_zero");
+
+        // Recordings keep a .mpg extension from Channels DVR even though the actual
+        // container is MPEG-TS. Without an explicit -f, ffmpeg picks the muxer from
+        // that extension and silently downgrades the output to MPEG-PS, which packs
+        // AC3 into "private_stream_1" PES packets badly enough that players like VLC
+        // misread the single 5.1 track as dozens of phantom audio tracks. Force TS so
+        // the container always matches the source regardless of the file's extension.
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("mpegts");
         psi.ArgumentList.Add(outputPath);
 
         var log = new StringBuilder();
