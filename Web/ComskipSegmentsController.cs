@@ -1,9 +1,12 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Detection;
+using Jellyfin.Data.Enums;
 using MediaBrowser.Common.Api;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
 using Microsoft.AspNetCore.Authorization;
@@ -82,27 +85,17 @@ public sealed class ComskipSegmentsController : ControllerBase
             return NotFound(new DetectResponse(false, $"No library item with ID {itemId}"));
         }
 
+        if (item is Folder)
+        {
+            return await DetectFolder(item, force, cancellationToken).ConfigureAwait(false);
+        }
+
         if (item.Path is null || !System.IO.File.Exists(item.Path))
         {
             return BadRequest(new DetectResponse(false, "Item has no resolvable file on disk"));
         }
 
-        if (force)
-        {
-            try
-            {
-                var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
-                await segmentManager.DeleteSegmentsAsync(itemId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not clear existing segments before forced re-detect of {ItemId}", itemId);
-            }
-
-            _store.Remove(itemId);
-        }
-
-        _manager.Enqueue(itemId, force);
+        await Enqueue(item, force, cancellationToken).ConfigureAwait(false);
 
         // Enqueue() no-ops silently when a non-forced request is filtered by the
         // show/channel gate or the item is already complete, so check what actually
@@ -119,6 +112,60 @@ public sealed class ComskipSegmentsController : ControllerBase
         _logger.LogInformation("Manual detection for {Path} (force={Force}): {Message}", item.Path, force, message);
 
         return Ok(new DetectResponse(force, message));
+    }
+
+    /// <summary>
+    /// A show, season or other folder (e.g. "Scan for commercials" on a series page):
+    /// queues every video file under it.
+    /// </summary>
+    private async Task<ActionResult<DetectResponse>> DetectFolder(BaseItem folder, bool force, CancellationToken cancellationToken)
+    {
+        var videos = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                AncestorIds = new[] { folder.Id },
+                IncludeItemTypes = new[] { BaseItemKind.Episode, BaseItemKind.Movie, BaseItemKind.Video },
+                MediaTypes = new[] { MediaType.Video },
+                Recursive = true,
+                IsVirtualItem = false
+            })
+            .Where(i => i.Path is not null && System.IO.File.Exists(i.Path))
+            .ToList();
+        if (videos.Count == 0)
+        {
+            return BadRequest(new DetectResponse(false, $"No video files found under \"{folder.Name}\""));
+        }
+
+        foreach (var video in videos)
+        {
+            await Enqueue(video, force, cancellationToken).ConfigureAwait(false);
+        }
+
+        var queued = videos.Count(v => _manager.IsInFlight(v.Id));
+        _logger.LogInformation("Manual detection for {Name}: {Queued} of {Total} videos queued (force={Force})", folder.Name, queued, videos.Count, force);
+        var message = queued == videos.Count
+            ? $"Queued {queued} videos"
+            : $"Queued {queued} of {videos.Count} videos; the rest are already complete or filtered by the show/channel allow- or block-list. Check Force to bypass.";
+        return Ok(new DetectResponse(queued > 0, message));
+    }
+
+    private async Task Enqueue(BaseItem item, bool force, CancellationToken cancellationToken)
+    {
+        if (force)
+        {
+            try
+            {
+                var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
+                await segmentManager.DeleteSegmentsAsync(item.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not clear existing segments before forced re-detect of {ItemId}", item.Id);
+            }
+
+            _store.Remove(item.Id);
+        }
+
+        _manager.Enqueue(item.Id, force);
     }
 
     public sealed record ClearResponse(bool Cleared, string Message);

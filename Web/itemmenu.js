@@ -25,11 +25,14 @@
  * If this breaks after a jellyfin-web update, re-check these against the running client
  * (open the item details page, click "...", inspect the action sheet in devtools).
  *
- * Scoped to the item DETAILS page specifically (URL `#/details?id=...`), not per-card
- * overflow menus in list/grid views — the details page is what the plugin's config page
- * already points people to for finding an item's ID, and it's the only place this script
- * can reliably learn which item the open menu belongs to (nothing in the action sheet's
- * own DOM identifies it).
+ * Nothing in the action sheet's own DOM says which item it belongs to, so the item is
+ * taken from the "..." that opened it (capture-phase listener, confirmed live on
+ * 2026-09-26): a row or card's own menu button is `[data-action="menu"]` inside
+ * `.listItem[data-id]` / `.card[data-id]` (e.g. each episode row on a Season page), and
+ * right-click on a card/row opens the same sheet; the details page's own "..." is
+ * `button.btnMoreCommands`, outside any row, and means the page's item (URL
+ * `#/details?id=...`). Using the page's id for everything was a real bug: an episode
+ * row's "Scan for commercials" on a Season page scanned the whole season.
  *
  * Both entries always force-run (ignore show/channel filters and any existing result) —
  * same one-click-does-something expectation as jellyfin-web's own "Refresh metadata"
@@ -70,6 +73,42 @@
     return isAdminPromise;
   }
 
+  // The item whose "..." was clicked last (null = the details page's own "..."), and when.
+  var menuItemId = null;
+  var menuClickedAt = 0;
+
+  function rememberMenuTarget(e, isContextMenu) {
+    var target = e.target;
+    if (!target || !target.closest) {
+      return;
+    }
+
+    var holder = target.closest('.card[data-id], .listItem[data-id]');
+    if (holder && holder.classList.contains('actionSheetMenuItem')) {
+      return; // a click inside an open action sheet, not one opening it
+    }
+
+    if (holder && (isContextMenu || target.closest('[data-action="menu"]'))) {
+      menuItemId = holder.getAttribute('data-id');
+      menuClickedAt = Date.now();
+    } else if (target.closest('.btnMoreCommands')) {
+      menuItemId = null;
+      menuClickedAt = Date.now();
+    }
+  }
+
+  document.addEventListener('click', function (e) { rememberMenuTarget(e, false); }, true);
+  document.addEventListener('contextmenu', function (e) { rememberMenuTarget(e, true); }, true);
+
+  // The item the just-opened action sheet belongs to: the row/card whose "..." opened it,
+  // else the details page's item.
+  function getMenuItemId() {
+    if (menuItemId && Date.now() - menuClickedAt < 5000) {
+      return menuItemId;
+    }
+    return getCurrentItemId();
+  }
+
   function getCurrentItemId() {
     var hash = window.location.hash || '';
     if (hash.indexOf('#/details') !== 0) {
@@ -82,6 +121,17 @@
     return new URLSearchParams(hash.slice(qIndex + 1)).get('id');
   }
 
+  // The plugin's own reason (e.g. "Item has no resolvable file on disk") when the failed
+  // request came back with one; apiClient.ajax rejects with the fetch Response.
+  function failureMessage(err, fallback) {
+    if (!err || typeof err.json !== 'function') {
+      return Promise.resolve(fallback);
+    }
+    return err.json()
+      .then(function (body) { return (body && body.Message) || fallback; })
+      .catch(function () { return fallback + ' (HTTP ' + err.status + ')'; });
+  }
+
   function runComskipScan(itemId, button) {
     var apiClient = window.ApiClient;
     button.disabled = true;
@@ -91,8 +141,8 @@
       dataType: 'json'
     }).then(function (r) {
       notify((r && r.Message) || 'Queued.');
-    }).catch(function () {
-      notify('Comskip scan request failed — check the item still exists and you have permission.');
+    }).catch(function (err) {
+      failureMessage(err, 'Comskip scan request failed.').then(notify);
     }).then(function () {
       button.disabled = false;
     });
@@ -114,8 +164,8 @@
       } else {
         notify((r && r.Message) || 'Nothing to trim.');
       }
-    }).catch(function () {
-      notify('Audio-trim request failed — check the item still exists, you have permission, and the feature is enabled in plugin settings.');
+    }).catch(function (err) {
+      failureMessage(err, 'Audio-trim request failed — check the feature is enabled in plugin settings.').then(notify);
     }).then(function () {
       button.disabled = false;
     });
@@ -205,7 +255,7 @@
   ];
 
   function tryInject(scroller) {
-    var itemId = getCurrentItemId();
+    var itemId = getMenuItemId();
     if (!itemId) {
       return;
     }
