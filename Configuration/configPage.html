@@ -74,7 +74,7 @@
                         <input id="EnableMediaSegmentScanEnqueue" name="EnableMediaSegmentScanEnqueue" type="checkbox" is="emby-checkbox" />
                         <span>Also detect during Jellyfin's own Media Segment Scan</span>
                     </label>
-                    <div class="fieldDescription">When Jellyfin asks this plugin for segments during its Media Segment Scan, queue detection for items that don't have results yet. Turn off to keep detection strictly on the watcher + backstop scan.</div>
+                    <div class="fieldDescription">When Jellyfin asks this plugin for segments during its Media Segment Scan, queue detection for items that don't have results yet. Comskip only runs automatically on files under the recordings folder and scan paths; anywhere else (e.g. archives on a NAS), a video gets breaks from an .edl another program left beside it, or from a manual scan. Turn off to keep detection strictly on the watcher + backstop scan.</div>
                 </div>
 
                 <div class="verticalSection">
@@ -240,7 +240,7 @@
                         <input id="PlaceEdlBesideRecording" name="PlaceEdlBesideRecording" type="checkbox" is="emby-checkbox" />
                         <span>Also place a copy of the .edl next to the recording</span>
                     </label>
-                    <div class="fieldDescription">For other software pointed at the recordings folder that expects a sibling .edl file (e.g. comchap/comcut-style tools). Independent of the setting above, which only affects the working copy in the work directory.</div>
+                    <div class="fieldDescription">For other software pointed at the recordings folder that expects a sibling .edl file (e.g. comchap/comcut-style tools). Independent of the setting above, which only affects the working copy in the work directory. Never replaces an .edl another program (SageTV, Channels DVR, Emby) left there; that file is used as the result instead of running Comskip.</div>
                 </div>
 
                 <button is="emby-button" type="submit" class="raised button-submit block emby-button">

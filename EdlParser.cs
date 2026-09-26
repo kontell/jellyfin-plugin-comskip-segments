@@ -13,14 +13,16 @@ public readonly record struct CommercialBreak(long StartTicks, long EndTicks);
 /// Format observed in testing (tab-separated, seconds as floats):
 ///     308.07\t428.86\t0
 ///     620.32\t837.34\t0
-/// The trailing integer is Comskip's action code; 0 == commercial. We deliberately
-/// filter on that code rather than assuming every row is a commercial, because other
-/// .ini settings can emit different actions.
+/// The trailing integer is the EDL action code. Comskip writes 0 (cut); other DVRs'
+/// commercial detectors (Channels DVR, Emby, Comskip set to Kodi-style output) write 3
+/// ("commercial break"), e.g. <c>0\t145.79\t3</c>. Both mean "skip this"; the other
+/// actions (1 mute, 2 scene marker) aren't commercials and are ignored.
 /// </summary>
 public static class EdlParser
 {
     private const long TicksPerSecond = 10_000_000L;
-    private const int CommercialAction = 0;
+    private const int CutAction = 0;
+    private const int CommercialBreakAction = 3;
 
     public static IReadOnlyList<CommercialBreak> Parse(string edlPath, double paddingSeconds)
     {
@@ -41,7 +43,7 @@ public static class EdlParser
             }
 
             if (!int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var action)
-                || action != CommercialAction)
+                || (action != CutAction && action != CommercialBreakAction))
             {
                 continue;
             }

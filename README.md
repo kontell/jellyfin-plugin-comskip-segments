@@ -111,6 +111,19 @@ that case rather than being hidden outright.
   under the recordings folder are queued automatically.
 - **Existing files:** add absolute folders to "Extra scan folders", then run
   Dashboard → Scheduled Tasks → **Scan library for commercials (Comskip)** on demand.
+  Comskip only runs automatically on files under the recordings folder and those extra
+  folders; any other library (e.g. archives on a NAS) is never scanned unless you ask for
+  it from an item's "..." menu.
+- **Archives with an .edl already:** when a video has an `.edl` beside it (same name,
+  `.edl` extension) written by another program — SageTV, Channels DVR, Emby, a standalone
+  Comskip — the plugin uses it instead of running Comskip, automatically (on Jellyfin's
+  Media Segment Scan) and for manual scans alike. Both EDL styles are understood:
+  Comskip's `0` (cut) and Kodi/Channels-style `3` (commercial break). Such a file is never
+  overwritten; "Also place a copy of the .edl next to the recording" only replaces `.edl`
+  files this plugin wrote itself.
+- **Library renamed or its folders edited:** Jellyfin deletes and re-creates every item
+  of the library, which also deletes their segments. The plugin notices each re-added
+  item that it has breaks for and publishes them again about 15 seconds later.
 
 Skip behavior (Auto vs Ask) is Jellyfin's own setting, per user, under playback
 preferences — this plugin only supplies the segments.
@@ -176,6 +189,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
+| (unreleased) | 2026-09-26 | Use an existing `.edl` beside a video (actions 0 and 3) instead of running Comskip, and never overwrite one; automatic Comskip runs limited to the recordings folder and scan paths; republish breaks when Jellyfin re-creates items (library rename); item menu acts on the clicked row; scanning a show/season queues its episodes. |
 | 1.0.1.0 | 2026-09-12 | Version bump only, no code changes. |
 | 1.0.0.0 | 2026-09-12 | Initial public release. |
 

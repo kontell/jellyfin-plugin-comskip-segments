@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ComskipSegments.Comskip;
 using MediaBrowser.Common.Configuration;
@@ -21,10 +22,19 @@ public enum DetectionStatus
     Failed
 }
 
+/// <param name="Source">Where the breaks came from: <see cref="SourceComskip"/> (this
+/// plugin ran Comskip) or <see cref="SourceEdl"/> (an .edl another program — SageTV,
+/// Channels DVR, Emby — left beside the video). Null on records written before this
+/// field existed, which were all Comskip runs.</param>
 public sealed record DetectionRecord(
     DetectionStatus Status,
     IReadOnlyList<CommercialBreak> Breaks,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    string? Source = null)
+{
+    public const string SourceComskip = "comskip";
+    public const string SourceEdl = "edl";
+}
 
 /// <summary>
 /// Tiny JSON-backed store keyed by Jellyfin ItemId. Its whole reason to exist is the
@@ -38,6 +48,8 @@ public sealed class DetectionStore
     private readonly string _path;
     private readonly object _ioLock = new();
     private readonly ConcurrentDictionary<Guid, DetectionRecord> _records;
+    private readonly string _ownedEdlsPath;
+    private readonly ConcurrentDictionary<string, byte> _ownedEdls;
 
     // Plugin.Instance.DataFolderPath is unreliable here: PluginServiceRegistrator runs
     // (and can eagerly resolve this singleton) before Jellyfin's plugin loader has
@@ -54,6 +66,47 @@ public sealed class DetectionStore
         _path = Path.Combine(dataFolder, "detection-state.json");
 
         _records = Load();
+
+        _ownedEdlsPath = Path.Combine(dataFolder, "owned-edls.json");
+        _ownedEdls = LoadOwnedEdls();
+    }
+
+    public IReadOnlyCollection<KeyValuePair<Guid, DetectionRecord>> All() => _records.ToArray();
+
+    /// <summary>
+    /// True if this plugin wrote the .edl at <paramref name="edlPath"/> (beside a recording).
+    /// Such a file is only our own earlier result, so it may be replaced and is never
+    /// "imported"; any other .edl beside a video belongs to another program and is
+    /// read but never overwritten.
+    /// </summary>
+    public bool IsOwnedEdl(string edlPath) => _ownedEdls.ContainsKey(edlPath);
+
+    public void MarkOwnedEdl(string edlPath)
+    {
+        if (_ownedEdls.TryAdd(edlPath, 0))
+        {
+            PersistOwnedEdls();
+        }
+    }
+
+    /// <summary>Marks several paths at once (startup seeding); persists once.</summary>
+    public int MarkOwnedEdls(IEnumerable<string> edlPaths)
+    {
+        var added = 0;
+        foreach (var p in edlPaths)
+        {
+            if (_ownedEdls.TryAdd(p, 0))
+            {
+                added++;
+            }
+        }
+
+        if (added > 0)
+        {
+            PersistOwnedEdls();
+        }
+
+        return added;
     }
 
     public bool TryGet(Guid itemId, out DetectionRecord record) => _records.TryGetValue(itemId, out record!);
@@ -94,6 +147,44 @@ public sealed class DetectionStore
         }
 
         return new ConcurrentDictionary<Guid, DetectionRecord>();
+    }
+
+    private ConcurrentDictionary<string, byte> LoadOwnedEdls()
+    {
+        try
+        {
+            if (File.Exists(_ownedEdlsPath))
+            {
+                var paths = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(_ownedEdlsPath));
+                if (paths is not null)
+                {
+                    return new ConcurrentDictionary<string, byte>(paths.Select(p => new KeyValuePair<string, byte>(p, 0)), StringComparer.Ordinal);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not load the list of .edl files this plugin wrote; starting fresh");
+        }
+
+        return new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+    }
+
+    private void PersistOwnedEdls()
+    {
+        lock (_ioLock)
+        {
+            try
+            {
+                var tmp = _ownedEdlsPath + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(_ownedEdls.Keys.OrderBy(p => p, StringComparer.Ordinal).ToList()));
+                File.Move(tmp, _ownedEdlsPath, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not persist the list of .edl files this plugin wrote");
+            }
+        }
     }
 
     private void Persist()

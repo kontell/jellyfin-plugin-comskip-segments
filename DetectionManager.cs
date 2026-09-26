@@ -54,6 +54,16 @@ public sealed class DetectionManager : BackgroundService
     private const int MaxDeferrals = 45; // ~90 min ceiling before we stop chasing a file
     private readonly ConcurrentDictionary<Guid, int> _deferrals = new();
     private readonly ConcurrentDictionary<Guid, byte> _requeueScheduled = new();
+    private readonly ConcurrentDictionary<Guid, byte> _republishPending = new();
+
+    // Long enough for Jellyfin to finish re-creating an item (and its siblings) before the
+    // stored breaks are published back onto it.
+    private static readonly TimeSpan RepublishDelay = TimeSpan.FromSeconds(15);
+
+    // A sibling .edl whose mtime is this close to a record's time was written by our own
+    // "place .edl beside recording" step (used to recognise files written before we
+    // started keeping a list of them).
+    private static readonly TimeSpan OwnedEdlTolerance = TimeSpan.FromMinutes(10);
     private CancellationToken _stoppingToken = CancellationToken.None;
 
     // NOTE: IMediaSegmentManager is resolved lazily via IServiceProvider rather than
@@ -85,54 +95,270 @@ public sealed class DetectionManager : BackgroundService
     private static PluginConfiguration Config =>
         Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
-    /// <summary>Enqueue an item for detection unless it's already done or already queued.</summary>
-    public void Enqueue(Guid itemId, bool force = false)
+    /// <summary>What <see cref="Enqueue"/> did with an item.</summary>
+    public enum EnqueueResult
+    {
+        /// <summary>Queued for Comskip (or already queued / deferred while still recording).</summary>
+        Queued,
+
+        /// <summary>Another program's .edl beside the video was used; no Comskip run needed.</summary>
+        ImportedEdl,
+
+        /// <summary>A completed result already exists (its segments are republished if missing).</summary>
+        AlreadyDone,
+
+        /// <summary>Not eligible: gone, outside the recordings folders, or filtered by the show/channel lists.</summary>
+        Skipped
+    }
+
+    /// <summary>
+    /// Gets commercial breaks for an item: from an .edl another program (SageTV, Channels
+    /// DVR, Emby) already left beside the video if there is one — always preferred, for
+    /// automatic and forced requests alike — otherwise by queueing a Comskip run.
+    /// Automatic (non-forced) Comskip runs are limited to files under the recordings
+    /// folder / scan paths and to the show/channel lists; a forced request (the item menu,
+    /// the config page) scans any file.
+    /// </summary>
+    public EnqueueResult Enqueue(Guid itemId, bool force = false)
     {
         if (itemId.Equals(Guid.Empty))
         {
-            return;
+            return EnqueueResult.Skipped;
         }
 
         if (!force && _store.IsCompleted(itemId))
         {
-            return;
+            RepublishIfMissing(itemId);
+            return EnqueueResult.AlreadyDone;
+        }
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item is null)
+        {
+            _logger.LogDebug("Enqueue skipped: item {ItemId} no longer exists", itemId);
+            return EnqueueResult.Skipped;
+        }
+
+        if (TryImportSiblingEdl(item, out _))
+        {
+            _ = Task.Run(() => PublishAsync(item, forceOverwrite: true, _stoppingToken));
+            return EnqueueResult.ImportedEdl;
         }
 
         if (!force)
         {
-            // Single chokepoint for the show/folder allow- & block-lists: the watcher and
-            // the media-segment provider both land here. LibraryScanTask pre-filters with
-            // the same gate (so its "eligible" count and skip log stay accurate), so it
-            // won't reach this branch for excluded items.
-            var item = _libraryManager.GetItemById(itemId);
-            if (item is null)
+            // Single chokepoint for automatic runs: the watcher and the media-segment
+            // provider both land here. LibraryScanTask pre-filters with the same checks
+            // (so its "eligible" count and skip log stay accurate).
+            if (!IsInAutoScope(item.Path))
             {
-                _logger.LogDebug("Enqueue skipped: item {ItemId} no longer exists", itemId);
-                return;
+                _logger.LogDebug("Enqueue skipped for {Path}: outside the recordings folder and scan paths", item.Path);
+                return EnqueueResult.Skipped;
             }
 
             if (!DetectionGate.ShouldAutoDetect(item, Config, out var reason, ResolveChannel))
             {
                 _logger.LogDebug("Enqueue skipped for {Path}: {Reason}", item.Path, reason);
-                return;
+                return EnqueueResult.Skipped;
             }
 
             if (item.Path is not null && IsStillBeingWritten(item.Path))
             {
                 _logger.LogDebug("Enqueue deferred, still recording: {Path}", item.Path);
                 ScheduleRequeue(itemId);
-                return;
+                return EnqueueResult.Queued;
             }
         }
 
         if (!_inFlight.TryAdd(itemId, 0))
         {
-            return; // already queued or running
+            return EnqueueResult.Queued; // already queued or running
         }
 
         if (!_queue.Writer.TryWrite(itemId))
         {
             _inFlight.TryRemove(itemId, out _);
+        }
+
+        return EnqueueResult.Queued;
+    }
+
+    /// <summary>
+    /// True if <paramref name="path"/> is under the recordings folder or one of the scan
+    /// paths — the only places Comskip runs automatically. Archives added from elsewhere
+    /// (NAS shares) get their breaks from an existing .edl, or from a manual scan.
+    /// </summary>
+    public static bool IsInAutoScope(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        var cfg = Config;
+        var roots = new List<string>();
+        if (!string.IsNullOrWhiteSpace(cfg.RecordingsPath))
+        {
+            roots.Add(cfg.RecordingsPath);
+        }
+
+        roots.AddRange((cfg.ScanPaths ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        return roots.Any(root =>
+        {
+            var r = root.TrimEnd('/') + "/";
+            return path.StartsWith(r, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>The .edl another program would leave beside <paramref name="videoPath"/> (same name, .edl extension).</summary>
+    public static string? SiblingEdlPath(string videoPath)
+    {
+        var dir = Path.GetDirectoryName(videoPath);
+        return dir is null ? null : Path.Combine(dir, Path.GetFileNameWithoutExtension(videoPath) + ".edl");
+    }
+
+    /// <summary>
+    /// If another program (SageTV, Channels DVR, Emby, a standalone Comskip) already left an
+    /// .edl beside the video, stores its breaks as this item's result instead of running
+    /// Comskip. An .edl this plugin wrote itself is not "another program's" and is ignored
+    /// here. Does not publish; callers do (or, for the segment provider, return the breaks).
+    /// </summary>
+    public bool TryImportSiblingEdl(BaseItem item, out DetectionRecord record)
+    {
+        record = null!;
+        if (item is not Video || string.IsNullOrEmpty(item.Path) || !item.IsFileProtocol
+            || SiblingEdlPath(item.Path) is not { } edlPath)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!File.Exists(edlPath) || _store.IsOwnedEdl(edlPath))
+            {
+                return false;
+            }
+
+            var breaks = EdlParser.Parse(edlPath, Config.PaddingSeconds);
+            var status = breaks.Count > 0 ? DetectionStatus.Detected : DetectionStatus.NoCommercials;
+            record = new DetectionRecord(status, breaks, DateTime.UtcNow, DetectionRecord.SourceEdl);
+            _store.Save(item.Id, record);
+            _logger.LogInformation("Using the existing .edl beside {Path}: {Count} break(s)", item.Path, breaks.Count);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            _logger.LogWarning(ex, "Could not read the .edl beside {Path}; falling back to Comskip rules", item.Path);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Puts an item's stored breaks back into Jellyfin if they went missing. Jellyfin
+    /// deletes an item's segments whenever it deletes the item, and it deletes and re-creates
+    /// every item of a library when the library is renamed or its folders edited — seen
+    /// live: renaming "Recorded Shows" to "TV Shows" wiped the segments of every recording
+    /// while our records stayed, so nothing showed until the next Media Segment Scan.
+    /// Asking the providers again without overwrite is a no-op when nothing is missing.
+    /// </summary>
+    public void RepublishIfMissing(Guid itemId)
+    {
+        if (!_store.TryGet(itemId, out var record) || record.Status != DetectionStatus.Detected
+            || !_republishPending.TryAdd(itemId, 0))
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(RepublishDelay, _stoppingToken).ConfigureAwait(false);
+                if (_libraryManager.GetItemById(itemId) is BaseItem item)
+                {
+                    await PublishAsync(item, forceOverwrite: false, _stoppingToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                _republishPending.TryRemove(itemId, out _);
+            }
+        });
+    }
+
+    private void OnItemAdded(object? sender, ItemChangeEventArgs e)
+    {
+        if (e.Item is Video)
+        {
+            RepublishIfMissing(e.Item.Id);
+        }
+    }
+
+    /// <summary>
+    /// Re-runs Jellyfin's segment providers for one item so our stored breaks are persisted
+    /// without waiting for the next Media Segment Scan. forceOverwrite replaces what is there
+    /// (a new result); without it Jellyfin only writes when our segments changed or are missing.
+    /// </summary>
+    private async Task PublishAsync(BaseItem item, bool forceOverwrite, CancellationToken ct)
+    {
+        try
+        {
+            // Resolved here (not in the constructor) to avoid a startup circular dependency.
+            var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
+            await segmentManager
+                .RunSegmentPluginProviders(item, _libraryManager.GetLibraryOptions(item), forceOverwrite, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Commercial breaks stored but could not be published for {Path}", item.Path);
+        }
+    }
+
+    /// <summary>
+    /// Records every .edl this plugin already placed beside a recording before it started
+    /// keeping a list of them (records without a Source), so those are recognised as ours:
+    /// replaceable by a new scan, never imported as another program's.
+    /// </summary>
+    private void SeedOwnedEdls()
+    {
+        var owned = new List<string>();
+        foreach (var (itemId, record) in _store.All())
+        {
+            if (record.Source is not null || _libraryManager.GetItemById(itemId) is not BaseItem item
+                || string.IsNullOrEmpty(item.Path) || SiblingEdlPath(item.Path) is not { } edlPath)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (File.Exists(edlPath)
+                    && (File.GetLastWriteTimeUtc(edlPath) - record.UpdatedUtc).Duration() <= OwnedEdlTolerance)
+                {
+                    owned.Add(edlPath);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        var added = _store.MarkOwnedEdls(owned);
+        if (added > 0)
+        {
+            _logger.LogInformation("Recognised {Count} .edl file(s) beside recordings as written by this plugin", added);
         }
     }
 
@@ -145,13 +371,23 @@ public sealed class DetectionManager : BackgroundService
         var workerCount = Math.Max(1, Config.MaxConcurrentJobs);
         _logger.LogInformation("Comskip detection manager starting with {Workers} worker(s)", workerCount);
 
+        _libraryManager.ItemAdded += OnItemAdded;
+        _ = Task.Run(SeedOwnedEdls, stoppingToken);
+
         var workers = new Task[workerCount];
         for (var i = 0; i < workerCount; i++)
         {
             workers[i] = WorkerLoop(stoppingToken);
         }
 
-        await Task.WhenAll(workers).ConfigureAwait(false);
+        try
+        {
+            await Task.WhenAll(workers).ConfigureAwait(false);
+        }
+        finally
+        {
+            _libraryManager.ItemAdded -= OnItemAdded;
+        }
     }
 
     private async Task WorkerLoop(CancellationToken ct)
@@ -270,13 +506,13 @@ public sealed class DetectionManager : BackgroundService
         if (result.Outcome == ComskipOutcome.Failed || result.EdlPath is null)
         {
             // Record as Failed (NOT NoCommercials) so it stays eligible for a retry.
-            _store.Save(itemId, new DetectionRecord(DetectionStatus.Failed, Array.Empty<CommercialBreak>(), DateTime.UtcNow));
+            _store.Save(itemId, new DetectionRecord(DetectionStatus.Failed, Array.Empty<CommercialBreak>(), DateTime.UtcNow, DetectionRecord.SourceComskip));
             return;
         }
 
         var breaks = EdlParser.Parse(result.EdlPath, cfg.PaddingSeconds);
         var status = breaks.Count > 0 ? DetectionStatus.Detected : DetectionStatus.NoCommercials;
-        _store.Save(itemId, new DetectionRecord(status, breaks, DateTime.UtcNow));
+        _store.Save(itemId, new DetectionRecord(status, breaks, DateTime.UtcNow, DetectionRecord.SourceComskip));
 
         _logger.LogInformation("{Status}: {Count} break(s) for {Path}", status, breaks.Count, item.Path);
 
@@ -290,22 +526,8 @@ public sealed class DetectionManager : BackgroundService
             CleanupWorkFiles(result.EdlPath);
         }
 
-        // Publish immediately: re-run providers for just this item so our stored
-        // segments get persisted to Jellyfin without waiting for the next full scan.
-        try
-        {
-            // Resolved here (not in the constructor) to avoid a startup circular dependency.
-            // Jellyfin 12: RunSegmentPluginProviders takes the item's LibraryOptions and
-            // renamed the flag to forceOverwrite.
-            var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
-            await segmentManager
-                .RunSegmentPluginProviders(item, _libraryManager.GetLibraryOptions(item), forceOverwrite: true, ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Detected segments stored but could not trigger immediate publish for {Path}", item.Path);
-        }
+        // Publish immediately so the new breaks don't wait for the next Media Segment Scan.
+        await PublishAsync(item, forceOverwrite: true, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -424,7 +646,14 @@ public sealed class DetectionManager : BackgroundService
             var destination = Path.Combine(
                 recordingDir,
                 Path.GetFileNameWithoutExtension(recordingPath) + ".edl");
+            if (File.Exists(destination) && !_store.IsOwnedEdl(destination))
+            {
+                _logger.LogInformation("Keeping the existing .edl beside {Path}: another program wrote it", recordingPath);
+                return;
+            }
+
             File.Copy(edlPath, destination, overwrite: true);
+            _store.MarkOwnedEdl(destination);
         }
         catch (Exception ex)
         {

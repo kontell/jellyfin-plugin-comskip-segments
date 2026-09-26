@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -55,7 +56,7 @@ public sealed class ComskipSegmentsController : ControllerBase
 
     public sealed record DetectResponse(bool Queued, string Message);
 
-    public sealed record StatusResponse(bool InFlight, string? Status, int? BreakCount, DateTime? UpdatedUtc);
+    public sealed record StatusResponse(bool InFlight, string? Status, int? BreakCount, DateTime? UpdatedUtc, string? Source = null);
 
     [HttpPost("Validate")]
     public ActionResult<ValidateResponse> Validate([FromBody] ValidateRequest request)
@@ -95,23 +96,17 @@ public sealed class ComskipSegmentsController : ControllerBase
             return BadRequest(new DetectResponse(false, "Item has no resolvable file on disk"));
         }
 
-        await Enqueue(item, force, cancellationToken).ConfigureAwait(false);
-
-        // Enqueue() no-ops silently when a non-forced request is filtered by the
-        // show/channel gate or the item is already complete, so check what actually
-        // happened rather than always claiming success.
-        if (_manager.IsInFlight(itemId))
+        var result = await Enqueue(item, force, cancellationToken).ConfigureAwait(false);
+        var (queued, message) = result switch
         {
-            _logger.LogInformation("Manual detection queued for {Path} (force={Force})", item.Path, force);
-            return Ok(new DetectResponse(true, "Queued"));
-        }
-
-        var message = force
-            ? "Queued" // forced enqueues land in the queue synchronously before this check
-            : "Not queued: item is already complete, or filtered by the show/channel allow- or block-list. Check Force to bypass.";
+            DetectionManager.EnqueueResult.ImportedEdl => (true, ImportedMessage(itemId)),
+            DetectionManager.EnqueueResult.Queued => (true, "Queued"),
+            DetectionManager.EnqueueResult.AlreadyDone => (false, "Not queued: item is already complete. Check Force to re-scan."),
+            _ => (false, "Not queued: outside the recordings folder and scan paths, or filtered by the show/channel allow- or block-list. Check Force to bypass."),
+        };
         _logger.LogInformation("Manual detection for {Path} (force={Force}): {Message}", item.Path, force, message);
 
-        return Ok(new DetectResponse(force, message));
+        return Ok(new DetectResponse(queued, message));
     }
 
     /// <summary>
@@ -135,20 +130,48 @@ public sealed class ComskipSegmentsController : ControllerBase
             return BadRequest(new DetectResponse(false, $"No video files found under \"{folder.Name}\""));
         }
 
+        int queued = 0, imported = 0;
         foreach (var video in videos)
         {
-            await Enqueue(video, force, cancellationToken).ConfigureAwait(false);
+            switch (await Enqueue(video, force, cancellationToken).ConfigureAwait(false))
+            {
+                case DetectionManager.EnqueueResult.Queued:
+                    queued++;
+                    break;
+                case DetectionManager.EnqueueResult.ImportedEdl:
+                    imported++;
+                    break;
+            }
         }
 
-        var queued = videos.Count(v => _manager.IsInFlight(v.Id));
-        _logger.LogInformation("Manual detection for {Name}: {Queued} of {Total} videos queued (force={Force})", folder.Name, queued, videos.Count, force);
-        var message = queued == videos.Count
-            ? $"Queued {queued} videos"
-            : $"Queued {queued} of {videos.Count} videos; the rest are already complete or filtered by the show/channel allow- or block-list. Check Force to bypass.";
-        return Ok(new DetectResponse(queued > 0, message));
+        var parts = new List<string>();
+        if (queued > 0)
+        {
+            parts.Add($"queued {queued} for Comskip");
+        }
+
+        if (imported > 0)
+        {
+            parts.Add($"used the existing .edl for {imported}");
+        }
+
+        var skipped = videos.Count - queued - imported;
+        if (skipped > 0)
+        {
+            parts.Add($"skipped {skipped} (already complete, or filtered; check Force to bypass)");
+        }
+
+        var message = $"{videos.Count} videos: " + string.Join(", ", parts) + ".";
+        _logger.LogInformation("Manual detection for {Name} (force={Force}): {Message}", folder.Name, force, message);
+        return Ok(new DetectResponse(queued + imported > 0, message));
     }
 
-    private async Task Enqueue(BaseItem item, bool force, CancellationToken cancellationToken)
+    private string ImportedMessage(Guid itemId) =>
+        _store.TryGet(itemId, out var record)
+            ? $"Used the existing .edl beside the video: {record.Breaks.Count} commercial break(s)."
+            : "Used the existing .edl beside the video.";
+
+    private async Task<DetectionManager.EnqueueResult> Enqueue(BaseItem item, bool force, CancellationToken cancellationToken)
     {
         if (force)
         {
@@ -165,7 +188,7 @@ public sealed class ComskipSegmentsController : ControllerBase
             _store.Remove(item.Id);
         }
 
-        _manager.Enqueue(item.Id, force);
+        return _manager.Enqueue(item.Id, force);
     }
 
     public sealed record ClearResponse(bool Cleared, string Message);
@@ -212,7 +235,7 @@ public sealed class ComskipSegmentsController : ControllerBase
 
         if (_store.TryGet(itemId, out var record))
         {
-            return Ok(new StatusResponse(inFlight, record.Status.ToString(), record.Breaks.Count, record.UpdatedUtc));
+            return Ok(new StatusResponse(inFlight, record.Status.ToString(), record.Breaks.Count, record.UpdatedUtc, record.Source ?? DetectionRecord.SourceComskip));
         }
 
         return Ok(new StatusResponse(inFlight, null, null, null));

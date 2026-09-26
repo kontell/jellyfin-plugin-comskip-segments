@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
 using MediaBrowser.Model;
 using MediaBrowser.Model.MediaSegments;
@@ -44,15 +45,18 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     private readonly ILogger<ComskipSegmentProvider> _logger;
     private readonly DetectionStore _store;
     private readonly DetectionManager _manager;
+    private readonly ILibraryManager _libraryManager;
 
     public ComskipSegmentProvider(
         ILogger<ComskipSegmentProvider> logger,
         DetectionStore store,
-        DetectionManager manager)
+        DetectionManager manager,
+        ILibraryManager libraryManager)
     {
         _logger = logger;
         _store = store;
         _manager = manager;
+        _libraryManager = libraryManager;
     }
 
     public string Name => "Comskip Commercial Segments";
@@ -72,26 +76,25 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     {
         var itemId = request.ItemId;
 
+        // Not processed yet, but another program (SageTV, Channels DVR, Emby) left an .edl
+        // beside the video: use it now, so archives added from elsewhere get their breaks
+        // on the first Media Segment Scan without anyone running Comskip on them.
+        if (!_store.IsCompleted(itemId)
+            && _libraryManager.GetItemById(itemId) is BaseItem item
+            && _manager.TryImportSiblingEdl(item, out var imported))
+        {
+            return Task.FromResult(ToSegments(itemId, imported));
+        }
+
         if (_store.TryGet(itemId, out var record) && record.Status == DetectionStatus.Detected)
         {
-            var segments = new List<MediaSegmentDto>(record.Breaks.Count);
-            foreach (var b in record.Breaks)
-            {
-                segments.Add(new MediaSegmentDto
-                {
-                    ItemId = itemId,
-                    Type = MediaSegmentType.Commercial,
-                    StartTicks = b.StartTicks,
-                    EndTicks = b.EndTicks
-                });
-            }
-
-            return Task.FromResult<IReadOnlyList<MediaSegmentDto>>(segments);
+            return Task.FromResult(ToSegments(itemId, record));
         }
 
         // Not yet processed (and not a known Failed/NoCommercials result): kick off
         // detection out of band and return empty. Enqueue() no-ops if it's already
-        // completed or in flight (and applies the show/folder filter), so this is safe
+        // completed or in flight, and only runs Comskip automatically on files in the
+        // recordings folder / scan paths that pass the show/channel lists, so this is safe
         // to call on every scan. Skipped entirely when the user has turned off
         // auto-enqueue from Jellyfin's own Media Segment Scan.
         if (!_store.IsCompleted(itemId)
@@ -101,6 +104,28 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
         }
 
         return Task.FromResult<IReadOnlyList<MediaSegmentDto>>(Array.Empty<MediaSegmentDto>());
+    }
+
+    private static IReadOnlyList<MediaSegmentDto> ToSegments(Guid itemId, DetectionRecord record)
+    {
+        if (record.Status != DetectionStatus.Detected)
+        {
+            return Array.Empty<MediaSegmentDto>();
+        }
+
+        var segments = new List<MediaSegmentDto>(record.Breaks.Count);
+        foreach (var b in record.Breaks)
+        {
+            segments.Add(new MediaSegmentDto
+            {
+                ItemId = itemId,
+                Type = MediaSegmentType.Commercial,
+                StartTicks = b.StartTicks,
+                EndTicks = b.EndTicks
+            });
+        }
+
+        return segments;
     }
 
     /// <summary>
