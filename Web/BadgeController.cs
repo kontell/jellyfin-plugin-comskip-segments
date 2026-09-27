@@ -72,7 +72,10 @@ public sealed class BadgeController : ControllerBase
 
     public sealed record BadgesResponse(BadgeSettings Settings, Dictionary<string, Badge> Items);
 
-    public sealed record GuideBadge(string ProgramId, string State, int? Minutes);
+    /// <param name="State">"scanning" while the live Comskip scan runs, else "recording"
+    /// (recording, but not scanned: e.g. a channel on the block-list). Badges show only for scanning.</param>
+    /// <param name="RecordingItemId">The in-progress recording as a library item, for "Watch from start".</param>
+    public sealed record GuideBadge(string ProgramId, string State, int? Minutes, string? RecordingItemId = null);
 
     public sealed record GuideResponse(BadgeSettings Settings, IReadOnlyList<GuideBadge> Programs);
 
@@ -120,14 +123,19 @@ public sealed class BadgeController : ControllerBase
                 var timers = await liveTv.GetTimers(new TimerQuery(), cancellationToken).ConfigureAwait(false);
                 foreach (var timer in timers.Items.Where(t => t.Status == RecordingStatus.InProgress && !string.IsNullOrEmpty(t.ProgramId)))
                 {
-                    var path = recordings.GetActiveRecordingPath(timer.Id);
-                    if (string.IsNullOrEmpty(path) || !_live.IsTracking(path))
+                    // Active recordings are keyed by the timer's own id, which the DTO carries
+                    // as ExternalId; its Id is a derived one (confirmed live: looking up by Id
+                    // found nothing, so no guide entry ever got its tag).
+                    var path = (timer.ExternalId is { } externalId ? recordings.GetActiveRecordingPath(externalId) : null)
+                        ?? recordings.GetActiveRecordingPath(timer.Id);
+                    if (string.IsNullOrEmpty(path))
                     {
                         continue;
                     }
 
+                    var scanning = _live.IsTracking(path);
                     int? minutes = null;
-                    if (_live.GetLiveEdl(path) is { } edl)
+                    if (scanning && _live.GetLiveEdl(path) is { } edl)
                     {
                         try
                         {
@@ -139,7 +147,8 @@ public sealed class BadgeController : ControllerBase
                         }
                     }
 
-                    programs.Add(new GuideBadge(timer.ProgramId, StateScanning, minutes));
+                    var recordingItem = _libraryManager.FindByPath(path, false);
+                    programs.Add(new GuideBadge(timer.ProgramId, scanning ? StateScanning : "recording", minutes, recordingItem?.Id.ToString("N")));
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

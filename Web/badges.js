@@ -304,6 +304,7 @@
     if (misc) {
       place(misc, badgeFor(id), 'detail', function (el) { misc.appendChild(el); });
     }
+    playFromStartIfAsked();
 
     renderGuide();
   }
@@ -312,6 +313,7 @@
 
   function refreshGuide() {
     if (!signedIn() || !document.querySelector('.programCell[data-id]') || Date.now() - guideAt < GUIDE_POLL_MS - 500) {
+      injectWatchFromStart();
       return Promise.resolve();
     }
     guideAt = Date.now();
@@ -322,7 +324,11 @@
         }
         guide = {};
         (r && r.Programs || []).forEach(function (p) {
-          guide[String(p.ProgramId).replace(/-/g, '')] = { State: p.State, Minutes: p.Minutes };
+          guide[String(p.ProgramId).replace(/-/g, '')] = {
+            State: p.State,
+            Minutes: p.Minutes,
+            RecordingItemId: p.RecordingItemId || null
+          };
         });
         renderGuide();
       })
@@ -335,8 +341,92 @@
       var cell = cells[i];
       var name = cell.querySelector('.guideProgramName');
       if (name) {
-        place(name, guide[cell.getAttribute('data-id')] || null, 'guide', function (el) { name.appendChild(el); });
+        var entry = guide[cell.getAttribute('data-id')];
+        // Recordings that aren't scanned (e.g. a block-listed channel) get no badge.
+        var badge = entry && entry.State === 'scanning' ? { State: entry.State, Minutes: entry.Minutes } : null;
+        place(name, badge, 'guide', function (el) { name.appendChild(el); });
       }
+    }
+    injectWatchFromStart();
+  }
+
+  // ---- "Watch from start" in the guide's program dialog ------------------------------
+
+  /*
+   * Playing a programme from the guide joins the channel live. While it is being recorded,
+   * this adds "Watch from start" to its program dialog, which plays the recording from the
+   * beginning instead, so commercials can be skipped while catching up (the overlay's live
+   * breaks). The dialog holds no programme id, so it is taken from the guide cell just
+   * clicked (the same approach as the Episode History plugin's guide script); the web
+   * client exposes no player API, so it opens the recording's page and presses its
+   * Play / Play-from-beginning button.
+   */
+  var lastProgramId = null;
+  var PLAY_FROM_START_KEY = 'comskipPlayFromStart';
+
+  document.addEventListener('click', function (e) {
+    var cell = e.target && e.target.closest && e.target.closest('.programCell[data-id]');
+    if (cell) {
+      lastProgramId = cell.getAttribute('data-id');
+    }
+  }, true);
+
+  function injectWatchFromStart() {
+    var fields = document.querySelector('.recordingDialog.opened .recordingFields .recordingFields');
+    var entry = lastProgramId && guide[lastProgramId];
+    if (!fields || !entry || !entry.RecordingItemId || fields.querySelector('.comskipWatchFromStartRow')) {
+      return;
+    }
+
+    var row = document.createElement('div');
+    row.className = 'recordingFields-buttons flex align-items-center comskipWatchFromStartRow';
+    var wrap = document.createElement('div');
+    var button = document.createElement('button');
+    button.setAttribute('is', 'emby-button');
+    button.type = 'button';
+    button.className = 'raised recordingButton emby-button';
+    var icon = document.createElement('span');
+    icon.className = 'material-icons recordingIcon replay';
+    icon.setAttribute('aria-hidden', 'true');
+    var text = document.createElement('span');
+    text.className = 'buttonText';
+    text.textContent = 'Watch from start';
+    button.appendChild(icon);
+    button.appendChild(text);
+    wrap.appendChild(button);
+    row.appendChild(wrap);
+    button.addEventListener('click', function () {
+      try {
+        window.sessionStorage.setItem(PLAY_FROM_START_KEY, entry.RecordingItemId);
+      } catch (e) {
+        // Private mode: the page opens without auto-play.
+      }
+      window.location.hash = '#/details?id=' + entry.RecordingItemId;
+    });
+    fields.appendChild(row);
+  }
+
+  // On the recording's page after "Watch from start": press Play from beginning (shown when
+  // there's a resume point) or else Play.
+  function playFromStartIfAsked() {
+    var wanted = null;
+    try {
+      wanted = window.sessionStorage.getItem(PLAY_FROM_START_KEY);
+    } catch (e) {
+      return;
+    }
+    if (!wanted || detailId() !== wanted) {
+      return;
+    }
+    var visible = function (sel) {
+      return [].slice.call(document.querySelectorAll(sel)).filter(function (b) {
+        return b.offsetParent !== null && !b.classList.contains('hide');
+      })[0];
+    };
+    var button = visible('.btnReplay') || visible('.btnPlay');
+    if (button) {
+      window.sessionStorage.removeItem(PLAY_FROM_START_KEY);
+      button.click();
     }
   }
 
