@@ -140,6 +140,9 @@
       url: apiClient.getUrl('ComskipSegments/Detect/' + itemId, { force: true }),
       dataType: 'json'
     }).then(function (r) {
+      if (window.__comskipBadgesInvalidate) {
+        window.__comskipBadgesInvalidate(itemId);
+      }
       notify((r && r.Message) || 'Queued.');
     }).catch(function (err) {
       failureMessage(err, 'Comskip scan request failed.').then(notify);

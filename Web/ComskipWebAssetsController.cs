@@ -45,6 +45,14 @@ public sealed class ComskipWebAssetsController : ControllerBase
         return Content(js, "application/javascript");
     }
 
+    [HttpGet("badges.js")]
+    [Produces("application/javascript")]
+    public async Task<ContentResult> GetBadgesJs()
+    {
+        var js = await ReadEmbeddedAsync("badges.js").ConfigureAwait(false);
+        return Content(js, "application/javascript");
+    }
+
     private static async Task<string> ReadEmbeddedAsync(string fileName)
     {
         var assembly = typeof(ComskipWebAssetsController).Assembly;

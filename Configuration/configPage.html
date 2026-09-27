@@ -243,6 +243,42 @@
                     <div class="fieldDescription">For other software pointed at the recordings folder that expects a sibling .edl file (e.g. comchap/comcut-style tools). Independent of the setting above, which only affects the working copy in the work directory. Never replaces an .edl another program (SageTV, Channels DVR, Emby) left there; that file is used as the result instead of running Comskip.</div>
                 </div>
 
+                <div class="verticalSection">
+                    <h2>Badges</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Status badges the browser overlay and Wholphin draw on recordings: amber while scanning, green when commercials are marked, grey when none were found, red when a scan failed.</div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="BadgeCardStyle">On cards and lists</label>
+                        <select is="emby-select" id="BadgeCardStyle" name="BadgeCardStyle" class="emby-select-withcolor emby-select">
+                            <option value="icon">Scissors with minutes of commercials</option>
+                            <option value="letters">CS letters</option>
+                        </select>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="BadgeGuideStyle">In the Live TV guide</label>
+                        <select is="emby-select" id="BadgeGuideStyle" name="BadgeGuideStyle" class="emby-select-withcolor emby-select">
+                            <option value="letters">CS letters (compact)</option>
+                            <option value="icon">Scissors with minutes</option>
+                        </select>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="BadgeScanningMotion">While scanning</label>
+                        <select is="emby-select" id="BadgeScanningMotion" name="BadgeScanningMotion" class="emby-select-withcolor emby-select">
+                            <option value="pulse">Slow pulse</option>
+                            <option value="spin">Spinning ring</option>
+                            <option value="none">No motion (color only)</option>
+                        </select>
+                        <div class="fieldDescription">Motion keeps a TV client redrawing while a scanning badge is on screen; "No motion" costs nothing.</div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input id="BadgeShowSummary" name="BadgeShowSummary" type="checkbox" is="emby-checkbox" />
+                        <span>Show a done/total summary on show and season cards</span>
+                    </label>
+                </div>
+
                 <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                     <span>Save</span>
                 </button>
@@ -274,6 +310,10 @@
                 page.querySelector("#PaddingSeconds").value = config.PaddingSeconds || 0;
                 page.querySelector("#CleanupWorkFiles").checked = !!config.CleanupWorkFiles;
                 page.querySelector("#PlaceEdlBesideRecording").checked = !!config.PlaceEdlBesideRecording;
+                page.querySelector("#BadgeCardStyle").value = config.BadgeCardStyle || "icon";
+                page.querySelector("#BadgeGuideStyle").value = config.BadgeGuideStyle || "letters";
+                page.querySelector("#BadgeScanningMotion").value = config.BadgeScanningMotion || "pulse";
+                page.querySelector("#BadgeShowSummary").checked = config.BadgeShowSummary !== false;
                 page.querySelector("#EnableAudioFormatTrim").checked = !!config.EnableAudioFormatTrim;
                 page.querySelector("#AudioTrimAutomaticApply").checked = !!config.AudioTrimAutomaticApply;
                 page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal !== false;
@@ -473,6 +513,10 @@
                         config.PaddingSeconds = parseFloat(page.querySelector("#PaddingSeconds").value) || 0;
                         config.CleanupWorkFiles = page.querySelector("#CleanupWorkFiles").checked;
                         config.PlaceEdlBesideRecording = page.querySelector("#PlaceEdlBesideRecording").checked;
+                        config.BadgeCardStyle = page.querySelector("#BadgeCardStyle").value;
+                        config.BadgeGuideStyle = page.querySelector("#BadgeGuideStyle").value;
+                        config.BadgeScanningMotion = page.querySelector("#BadgeScanningMotion").value;
+                        config.BadgeShowSummary = page.querySelector("#BadgeShowSummary").checked;
                         config.EnableAudioFormatTrim = page.querySelector("#EnableAudioFormatTrim").checked;
                         config.AudioTrimAutomaticApply = page.querySelector("#AudioTrimAutomaticApply").checked;
                         config.AudioTrimKeepOriginal = page.querySelector("#AudioTrimKeepOriginal").checked;

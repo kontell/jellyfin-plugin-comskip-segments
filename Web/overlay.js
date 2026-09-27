@@ -25,12 +25,25 @@
 (function () {
   'use strict';
 
+  // The status badges (badges.js) ride along with this script, so an index.html patched
+  // before they existed picks them up without re-running install-overlay.sh.
+  if (!document.querySelector('script[src*="ComskipSegments/web/badges.js"]')) {
+    var badges = document.createElement('script');
+    badges.src = '/ComskipSegments/web/badges.js';
+    badges.defer = true;
+    document.head.appendChild(badges);
+  }
+
   var POLL_MS = 1500;
   var TICKS_PER_SECOND = 10000000; // .NET/Jellyfin ticks: 100ns units
   var MIN_MARKER_WIDTH_PCT = 0.3;
 
   var lastItemId = null;
-  var segmentsCache = {}; // itemId -> Array<{StartTicks, EndTicks}> (empty array = "checked, none")
+  var segmentsCache = {}; // itemId -> { segs: Array<{StartTicks, EndTicks}>, at: ms }
+  // An empty answer is only trusted briefly: a video opened while its scan is still
+  // running (or before a library rename's segments are republished) gets its markers
+  // once they exist, without reloading the page.
+  var EMPTY_RECHECK_MS = 30000;
 
   function log(msg) {
     if (window.console && window.console.debug) {
@@ -77,19 +90,20 @@
   }
 
   function fetchCommercialSegments(apiClient, itemId) {
-    if (Object.prototype.hasOwnProperty.call(segmentsCache, itemId)) {
-      return Promise.resolve(segmentsCache[itemId]);
+    var cached = segmentsCache[itemId];
+    if (cached && (cached.segs.length || Date.now() - cached.at < EMPTY_RECHECK_MS)) {
+      return Promise.resolve(cached.segs);
     }
     return apiClient.getJSON(apiClient.getUrl('MediaSegments/' + itemId))
       .then(function (res) {
         var items = (res && res.Items) || [];
         var segs = items.filter(function (s) { return s.Type === 'Commercial'; });
-        segmentsCache[itemId] = segs;
+        segmentsCache[itemId] = { segs: segs, at: Date.now() };
         return segs;
       })
       .catch(function (err) {
         log('MediaSegments fetch failed for ' + itemId + ': ' + err);
-        segmentsCache[itemId] = [];
+        segmentsCache[itemId] = { segs: [], at: Date.now() };
         return [];
       });
   }

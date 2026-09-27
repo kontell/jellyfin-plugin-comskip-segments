@@ -34,6 +34,7 @@
     <EmbeddedResource Include="Web\overlay.js" />
     <EmbeddedResource Include="Web\overlay.css" />
     <EmbeddedResource Include="Web\itemmenu.js" />
+    <EmbeddedResource Include="Web\badges.js" />
   </ItemGroup>
 
   <!-- Not embedded resources: meta.json's "imagePath" points the dashboard at icon.png

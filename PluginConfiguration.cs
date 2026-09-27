@@ -243,4 +243,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// seconds of junk audio left in place.
     /// </summary>
     public double AudioTrimPaddingSeconds { get; set; } = 1.5;
+
+    /// <summary>
+    /// Badge on cards and list rows (web script, Wholphin): "icon" = scissors with the total
+    /// minutes of commercials, "letters" = a colored CS tag.
+    /// </summary>
+    public string BadgeCardStyle { get; set; } = "icon";
+
+    /// <summary>Badge in the Live TV guide: "letters" (a colored CS tag, compact next to the
+    /// Episode History marks) or "icon".</summary>
+    public string BadgeGuideStyle { get; set; } = "letters";
+
+    /// <summary>How a "scanning" badge moves: "pulse" (slow fade), "spin" or "none" (color only).</summary>
+    public string BadgeScanningMotion { get; set; } = "pulse";
+
+    /// <summary>Show a done/total summary badge on show and season cards.</summary>
+    public bool BadgeShowSummary { get; set; } = true;
 }

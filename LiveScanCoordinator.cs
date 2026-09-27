@@ -132,6 +132,28 @@ public sealed class LiveScanCoordinator : IDisposable
     /// or (see class remarks) it had already exited on its own, which makes its partial
     /// .edl unreliable rather than a trustworthy stand-in for the whole recording.
     /// </summary>
+    /// <summary>
+    /// The partial .edl a live job is writing for a recording still in progress, for
+    /// showing "commercials found so far". Null when no live job tracks this path, its
+    /// process already gave up (see class remarks), or it hasn't written anything yet.
+    /// </summary>
+    public string? GetLiveEdl(string mediaPath)
+    {
+        if (!_jobs.TryGetValue(Normalize(mediaPath), out var job))
+        {
+            return null;
+        }
+
+        try
+        {
+            return !job.Process.HasExited && File.Exists(job.EdlPath) ? job.EdlPath : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public string? TryHarvest(string mediaPath)
     {
         if (!_jobs.TryRemove(Normalize(mediaPath), out var job))
