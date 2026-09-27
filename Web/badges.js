@@ -401,6 +401,10 @@
       } catch (e) {
         // Private mode: the page opens without auto-play.
       }
+      var cancel = document.querySelector('.recordingDialog.opened .btnCancel');
+      if (cancel) {
+        cancel.click();
+      }
       window.location.hash = '#/details?id=' + entry.RecordingItemId;
     });
     fields.appendChild(row);
@@ -418,9 +422,15 @@
     if (!wanted || detailId() !== wanted) {
       return;
     }
+    // Only the item page's own buttons: the guide's program dialog has a "Play" (watch the
+    // channel live) with the same btnPlay class, and it can still be on screen while the
+    // page opens, so wait for dialogs to close and never press a button inside one.
+    if (document.querySelector('.dialogContainer .dialog.opened, .recordingDialog.opened')) {
+      return;
+    }
     var visible = function (sel) {
       return [].slice.call(document.querySelectorAll(sel)).filter(function (b) {
-        return b.offsetParent !== null && !b.classList.contains('hide');
+        return b.offsetParent !== null && !b.classList.contains('hide') && !b.closest('.dialog, .formDialogFooter');
       })[0];
     };
     var button = visible('.btnReplay') || visible('.btnPlay');
