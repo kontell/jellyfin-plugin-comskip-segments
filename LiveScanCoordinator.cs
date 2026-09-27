@@ -154,6 +154,61 @@ public sealed class LiveScanCoordinator : IDisposable
         }
     }
 
+    // A live scan must have read at least this much of the finished recording to be trusted.
+    private const double MinHarvestProgress = 0.97;
+
+    /// <summary>
+    /// How far (0-1) the live Comskip process has read into the recording, from the kernel's
+    /// file offset for its open handle (/proc/pid/fdinfo); null when it can't be told
+    /// (not Linux, file not open, no access), in which case the result is used as before.
+    /// </summary>
+    private double? ReadProgress(int pid, string mediaPath)
+    {
+        try
+        {
+            var size = new FileInfo(mediaPath).Length;
+            if (size <= 0 || !Directory.Exists($"/proc/{pid}/fd"))
+            {
+                return null;
+            }
+
+            long? position = null;
+            foreach (var fd in Directory.GetFiles($"/proc/{pid}/fd"))
+            {
+                if (!string.Equals(new FileInfo(fd).LinkTarget, mediaPath, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var posLine = File.ReadLines($"/proc/{pid}/fdinfo/{Path.GetFileName(fd)}")
+                    .FirstOrDefault(l => l.StartsWith("pos:", StringComparison.Ordinal));
+                if (posLine is not null && long.TryParse(posLine.AsSpan(4).Trim(), out var pos))
+                {
+                    position = Math.Max(position ?? 0, pos);
+                }
+            }
+
+            return position is null ? null : Math.Min(1.0, (double)position.Value / size);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not read live Comskip progress for {Path}", mediaPath);
+            return null;
+        }
+    }
+
+    private static bool HasAnyBreak(string edlPath)
+    {
+        try
+        {
+            return File.ReadLines(edlPath).Any(l => !string.IsNullOrWhiteSpace(l));
+        }
+        catch (IOException)
+        {
+            return true; // unreadable right now: don't second-guess it here
+        }
+    }
+
     public string? TryHarvest(string mediaPath)
     {
         if (!_jobs.TryRemove(Normalize(mediaPath), out var job))
@@ -166,12 +221,34 @@ public sealed class LiveScanCoordinator : IDisposable
         // its own at some earlier, unknown point; do not use its .edl.
         var selfExited = job.Process.HasExited;
 
+        // Alive isn't enough: a live scan can fall behind the recording (seen live: a busy
+        // server, two back-to-back recordings plus Intro Skipper, left one still reading the
+        // early part of the file when the recording ended; its result said "no commercials",
+        // a full scan found 3). Read how far into the file it got before stopping it.
+        var progress = selfExited ? null : ReadProgress(job.Process.Id, mediaPath);
+
         TryKill(job.Process);
         job.Process.Dispose();
 
         if (selfExited)
         {
             LogSelfExit(mediaPath, job);
+            return null;
+        }
+
+        if (progress is < MinHarvestProgress)
+        {
+            _logger.LogInformation(
+                "Live Comskip scan for {Path} had only read {Percent:P0} of the recording; discarding it for a full scan",
+                mediaPath, progress);
+            return null;
+        }
+
+        if (File.Exists(job.EdlPath) && !HasAnyBreak(job.EdlPath))
+        {
+            // Ad-free channels are normally skipped by the channel lists before a live scan
+            // starts, so "none at all" is more likely a scan that missed them: confirm it.
+            _logger.LogInformation("Live Comskip scan for {Path} found no breaks; confirming with a full scan", mediaPath);
             return null;
         }
 
