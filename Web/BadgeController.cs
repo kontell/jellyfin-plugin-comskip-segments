@@ -151,6 +151,53 @@ public sealed class BadgeController : ControllerBase
         return Ok(new GuideResponse(Settings(), programs));
     }
 
+    public sealed record LiveSegment(string Type, long StartTicks, long EndTicks);
+
+    /// <param name="InProgress">The recording is still being written. False: use Jellyfin's
+    /// own segments (GET /MediaSegments/{id}), which exist once the recording is finished.</param>
+    /// <param name="Items">Commercial breaks the live Comskip scan has found so far.</param>
+    public sealed record LiveResponse(bool InProgress, IReadOnlyList<LiveSegment> Items);
+
+    /// <summary>
+    /// Commercial breaks found so far in a recording that is still in progress. Jellyfin
+    /// itself serves no segments for such an item until the recording finishes (its
+    /// segments endpoint 404s), so the web overlay and Wholphin ask here to mark and skip
+    /// commercials while catching up on, say, a game still being recorded. Takes a library
+    /// item id or an active recording's id.
+    /// </summary>
+    [HttpGet("~/ComskipSegments/Live/{id}")]
+    public ActionResult<LiveResponse> Live([FromRoute] string id)
+    {
+        var recordings = _serviceProvider.GetService<IRecordingsManager>();
+        string? path = null;
+        if (Guid.TryParse(id, out var itemId) && _libraryManager.GetItemById(itemId) is BaseItem item)
+        {
+            path = item.Path;
+        }
+
+        path ??= recordings?.GetActiveRecordingPath(id);
+        if (string.IsNullOrEmpty(path) || recordings?.GetActiveRecordingInfo(path) is null)
+        {
+            return Ok(new LiveResponse(false, Array.Empty<LiveSegment>()));
+        }
+
+        var segments = new List<LiveSegment>();
+        if (_live.GetLiveEdl(path) is { } edl)
+        {
+            try
+            {
+                var padding = (Plugin.Instance?.Configuration ?? new PluginConfiguration()).PaddingSeconds;
+                segments.AddRange(EdlParser.Parse(edl, padding).Select(b => new LiveSegment("Commercial", b.StartTicks, b.EndTicks)));
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // Being rewritten by Comskip at this instant; the next poll gets it.
+            }
+        }
+
+        return Ok(new LiveResponse(true, segments));
+    }
+
     private Badge? ItemBadge(BaseItem item)
     {
         if (item is not Video)

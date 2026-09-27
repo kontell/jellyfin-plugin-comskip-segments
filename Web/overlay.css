@@ -34,3 +34,25 @@
 .comskip-marker:hover {
   background: rgba(229, 57, 53, 0.85);
 }
+
+/* "Skip commercial" for breaks found by the live scan of a recording still in progress. */
+.comskip-live-skip {
+  position: fixed;
+  right: 4%;
+  bottom: 22%;
+  z-index: 1000;
+  padding: 0.7em 1.4em;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.85);
+  color: #fff;
+  font-size: 1.1em;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.comskip-live-skip:hover,
+.comskip-live-skip:focus {
+  background: #00a4dc;
+}

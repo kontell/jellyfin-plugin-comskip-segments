@@ -44,6 +44,12 @@
   // running (or before a library rename's segments are republished) gets its markers
   // once they exist, without reloading the page.
   var EMPTY_RECHECK_MS = 30000;
+  // A recording still in progress: Jellyfin serves no segments for it yet, so the plugin's
+  // live scan (GET /ComskipSegments/Live/{id}) supplies the breaks found so far, re-asked
+  // this often while it keeps recording.
+  var LIVE_RECHECK_MS = 15000;
+  var lastSignature = null;
+  var liveBreaks = { itemId: null, segs: [] };
 
   function log(msg) {
     if (window.console && window.console.debug) {
@@ -91,18 +97,39 @@
 
   function fetchCommercialSegments(apiClient, itemId) {
     var cached = segmentsCache[itemId];
-    if (cached && (cached.segs.length || Date.now() - cached.at < EMPTY_RECHECK_MS)) {
-      return Promise.resolve(cached.segs);
+    if (cached) {
+      var ttl = cached.live ? LIVE_RECHECK_MS : (cached.segs.length ? Infinity : EMPTY_RECHECK_MS);
+      if (Date.now() - cached.at < ttl) {
+        return Promise.resolve(cached.segs);
+      }
     }
     return apiClient.getJSON(apiClient.getUrl('MediaSegments/' + itemId))
       .then(function (res) {
         var items = (res && res.Items) || [];
-        var segs = items.filter(function (s) { return s.Type === 'Commercial'; });
-        segmentsCache[itemId] = { segs: segs, at: Date.now() };
+        return items.filter(function (s) { return s.Type === 'Commercial'; });
+      }, function () {
+        return []; // 404 while the recording is still in progress
+      })
+      .then(function (segs) {
+        if (segs.length) {
+          segmentsCache[itemId] = { segs: segs, at: Date.now() };
+          return segs;
+        }
+        return fetchLiveSegments(apiClient, itemId);
+      });
+  }
+
+  function fetchLiveSegments(apiClient, itemId) {
+    return apiClient.getJSON(apiClient.getUrl('ComskipSegments/Live/' + itemId))
+      .then(function (res) {
+        var live = !!(res && res.InProgress);
+        var segs = live ? (res.Items || []) : [];
+        segmentsCache[itemId] = { segs: segs, at: Date.now(), live: live };
+        liveBreaks = { itemId: live ? itemId : null, segs: segs };
         return segs;
       })
       .catch(function (err) {
-        log('MediaSegments fetch failed for ' + itemId + ': ' + err);
+        log('segment fetch failed for ' + itemId + ': ' + err);
         segmentsCache[itemId] = { segs: [], at: Date.now() };
         return [];
       });
@@ -144,6 +171,63 @@
     });
   }
 
+  // The video's own length, or for a recording still being written (whose stream reports an
+  // infinite duration) the total jellyfin-web shows at the end of the seek bar, which is
+  // what the bar's 0-100% spans.
+  function playerDurationTicks(video) {
+    if (video.duration && isFinite(video.duration)) {
+      return video.duration * TICKS_PER_SECOND;
+    }
+    var text = document.querySelector('.videoOsdBottom .osdDurationText');
+    var parts = text && text.textContent.trim().replace(/^-/, '').split(':');
+    if (!parts || parts.length < 2) {
+      return 0;
+    }
+    var seconds = 0;
+    for (var i = 0; i < parts.length; i++) {
+      var n = parseInt(parts[i], 10);
+      if (isNaN(n)) {
+        return 0;
+      }
+      seconds = seconds * 60 + n;
+    }
+    return seconds * TICKS_PER_SECOND;
+  }
+
+  /*
+   * "Skip commercial" for breaks found by the live scan. jellyfin-web's own skip prompt
+   * only knows Jellyfin's segments, which an in-progress recording doesn't have yet, so
+   * while one plays this offers the skip itself (the prompt takes over once it finishes).
+   */
+  var skipButton = null;
+  function updateLiveSkip(itemId) {
+    var video = document.querySelector('video');
+    var seg = null;
+    if (video && itemId && liveBreaks.itemId === itemId) {
+      var now = video.currentTime * TICKS_PER_SECOND;
+      seg = liveBreaks.segs.filter(function (s) { return now >= s.StartTicks && now < s.EndTicks - TICKS_PER_SECOND; })[0] || null;
+    }
+    if (!seg) {
+      if (skipButton) {
+        skipButton.remove();
+        skipButton = null;
+      }
+      return;
+    }
+    if (!skipButton) {
+      skipButton = document.createElement('button');
+      skipButton.type = 'button';
+      skipButton.className = 'comskip-live-skip';
+      skipButton.textContent = 'Skip commercial';
+      document.body.appendChild(skipButton);
+    }
+    skipButton.onclick = function () {
+      video.currentTime = ticksToSeconds(seg.EndTicks);
+      skipButton.remove();
+      skipButton = null;
+    };
+  }
+
   function clampPct(n) {
     return Math.max(0, Math.min(100, n));
   }
@@ -157,24 +241,18 @@
     var osd = findOsd();
     if (!osd) {
       lastItemId = null;
+      lastSignature = null;
+      updateLiveSkip(null);
       return Promise.resolve();
     }
 
     return getNowPlayingItemId(apiClient).then(function (itemId) {
+      updateLiveSkip(itemId);
       if (!itemId) {
         return;
       }
 
-      var alreadyRendered = itemId === lastItemId
-        && osd.markerContainer.querySelector('.comskip-marker');
-      if (alreadyRendered) {
-        return;
-      }
-
-      var durationTicks = osd.video.duration && isFinite(osd.video.duration)
-        ? osd.video.duration * TICKS_PER_SECOND
-        : 0;
-
+      var durationTicks = playerDurationTicks(osd.video);
       if (!durationTicks) {
         // Duration not known yet (still opening the stream) — try again next tick
         // without marking this item as done.
@@ -182,7 +260,16 @@
       }
 
       return fetchCommercialSegments(apiClient, itemId).then(function (segments) {
+        // Redraw only when something changed: new breaks from a live scan, a new item, a
+        // growing recording's length, or jellyfin-web having cleared the container.
+        var signature = itemId + '|' + Math.round(durationTicks / TICKS_PER_SECOND / 10) + '|' +
+          segments.map(function (s) { return s.StartTicks + '-' + s.EndTicks; }).join(',');
+        var present = !segments.length || osd.markerContainer.querySelector('.comskip-marker');
+        if (signature === lastSignature && present) {
+          return;
+        }
         lastItemId = itemId;
+        lastSignature = signature;
         renderMarkers(osd.markerContainer, osd.video, segments, durationTicks);
       });
     });
