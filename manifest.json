@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/mackandall/jellyfin-plugin-comskip-segments/main/icon.png",
     "versions": [
       {
+        "version": "1.1.0.0",
+        "changelog": "Skip commercials in recordings still in progress (web + TV forks), web commercial badges, \"Watch from start\" for programmes being recorded, use existing .edl files, AudioTrim writes MPEG-TS for .mpg, menu and live-scan fixes. Re-run Web/install-overlay.sh for the web features.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/mackandall/jellyfin-plugin-comskip-segments/releases/download/v1.1.0.0/jellyfin-plugin-comskip-segments_1.1.0.0.zip",
+        "checksum": "02cee10b0c8b6d44ee9faa310593e023",
+        "timestamp": "2026-09-28T22:05:58.0000000Z"
+      },
+      {
         "version": "1.0.1.0",
         "changelog": "Version bump only, no code changes.",
         "targetAbi": "12.0.0.0",

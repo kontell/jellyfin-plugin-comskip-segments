@@ -189,7 +189,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
-| (unreleased) | 2026-09-26 | Use an existing `.edl` beside a video (actions 0 and 3) instead of running Comskip, and never overwrite one; automatic Comskip runs limited to the recordings folder and scan paths; republish breaks when Jellyfin re-creates items (library rename); item menu acts on the clicked row; scanning a show/season queues its episodes. |
+| 1.1.0.0 | 2026-09-28 | Skip commercials in recordings still in progress (web + TV forks), web commercial badges, "Watch from start" for programmes being recorded, use existing .edl files, AudioTrim writes MPEG-TS for .mpg, menu and live-scan fixes. Re-run Web/install-overlay.sh for the web features. |
 | 1.0.1.0 | 2026-09-12 | Version bump only, no code changes. |
 | 1.0.0.0 | 2026-09-12 | Initial public release. |
 
