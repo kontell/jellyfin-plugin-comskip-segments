@@ -1,6 +1,8 @@
 /*
  * Comskip Commercial Segments — item-details action-sheet menu entries:
- *   1. "Scan for commercials" (comskip-scan)
+ *   1. "Scan for commercials" (comskip-scan), which follows the item's state each time
+ *      the menu opens: "Remove commercials" (comskip-remove) once breaks were found,
+ *      "Scanning for commercials…" (disabled) while a scan runs
  *   2. "Fix opening/closing audio format" (audiotrim-apply)
  *
  * Injected into jellyfin-web's index.html (see Web/install-overlay.sh, same mechanism
@@ -151,6 +153,50 @@
     });
   }
 
+  // "Remove commercials": for a scan that shouldn't have happened. Removes only the
+  // commercial marks and keeps them removed (automatic detection leaves the item alone);
+  // "Scan for commercials" brings them back, so the click is the confirmation, as for
+  // the scan itself.
+  function runComskipRemove(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'POST',
+      url: apiClient.getUrl('ComskipSegments/Clear/' + itemId, { keep: true }),
+      dataType: 'json'
+    }).then(function (r) {
+      if (window.__comskipBadgesInvalidate) {
+        window.__comskipBadgesInvalidate(itemId);
+      }
+      notify(((r && r.Message) || 'Commercials removed.') + ' "Scan for commercials" finds them again if you change your mind.');
+    }).catch(function (err) {
+      failureMessage(err, 'Removing the commercials failed.').then(notify);
+    }).then(function () {
+      button.disabled = false;
+    });
+  }
+
+  // Where Comskip is with the item; null when it can't tell (a season or show, an error).
+  function comskipStatus(itemId) {
+    var apiClient = window.ApiClient;
+    return apiClient.ajax({
+      type: 'GET',
+      url: apiClient.getUrl('ComskipSegments/Status/' + itemId),
+      dataType: 'json'
+    }).catch(function () { return null; });
+  }
+
+  // The commercials entry for this item's state: scanning now, breaks found, or not yet.
+  function commercialsEntry(status) {
+    if (status && status.InFlight) {
+      return { dataId: 'comskip-scanning', icon: 'hourglass_top', label: 'Scanning for commercials…', disabled: true };
+    }
+    if (status && status.Status === 'Detected' && status.BreakCount > 0) {
+      return { dataId: 'comskip-remove', icon: 'layers_clear', label: 'Remove commercials', run: runComskipRemove };
+    }
+    return MENU_ITEMS[0];
+  }
+
   function runAudioTrim(itemId, button) {
     var apiClient = window.ApiClient;
     button.disabled = true;
@@ -265,17 +311,30 @@
 
     checkIsAdmin().then(function (isAdmin) {
       if (!isAdmin) {
-        return;
+        return null;
+      }
+      return comskipStatus(itemId).then(function (status) {
+        return [commercialsEntry(status)].concat(MENU_ITEMS.slice(1));
+      });
+    }).then(function (entries) {
+      if (!entries || scroller.querySelector('[data-id^="comskip-"]')) {
+        return; // not an admin, or already injected (this can fire more than once per open)
       }
 
-      MENU_ITEMS.forEach(function (entry) {
+      entries.forEach(function (entry) {
         if (scroller.querySelector('[data-id="' + entry.dataId + '"]')) {
-          return; // already injected (this callback can fire more than once per open)
+          return;
         }
 
-        scroller.appendChild(buildMenuItem(entry.dataId, entry.icon, entry.label, function (button) {
-          entry.run(itemId, button);
-        }));
+        var button = buildMenuItem(entry.dataId, entry.icon, entry.label, function (b) {
+          if (entry.run) {
+            entry.run(itemId, b);
+          }
+        });
+        if (entry.disabled) {
+          button.disabled = true;
+        }
+        scroller.appendChild(button);
       });
     });
   }
