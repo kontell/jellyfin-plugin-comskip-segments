@@ -203,13 +203,54 @@ public sealed class ComskipSegmentsController : ControllerBase
     /// eligible for a normal, gate-respecting automatic re-detect afterward, same as any
     /// item with no stored record.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="keep"/> ("Remove commercials" in the apps, for a scan that shouldn't
+    /// have happened): removes only the Commercial segments (intros, recaps and the like
+    /// stay), deletes the .edl this plugin placed beside the video, and records the item as
+    /// having no commercials, so automatic detection leaves it alone. A forced scan
+    /// (Detect with force) still re-scans it.
+    /// </remarks>
     [HttpPost("Clear/{itemId}")]
-    public async Task<ActionResult<ClearResponse>> Clear([FromRoute] Guid itemId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ClearResponse>> Clear([FromRoute] Guid itemId, [FromQuery] bool keep, CancellationToken cancellationToken)
     {
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
         {
             return NotFound(new ClearResponse(false, $"No library item with ID {itemId}"));
+        }
+
+        if (keep)
+        {
+            try
+            {
+                var segments = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
+                var commercials = await segments.GetSegmentsAsync(item, new[] { Jellyfin.Database.Implementations.Enums.MediaSegmentType.Commercial }, _libraryManager.GetLibraryOptions(item), filterByProvider: false).ConfigureAwait(false);
+                foreach (var segment in commercials)
+                {
+                    await segments.DeleteSegmentAsync(segment.Id).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not remove commercial segments for {ItemId}", itemId);
+                return Ok(new ClearResponse(false, $"Could not remove the commercials: {ex.Message}"));
+            }
+
+            if (item.Path is not null && DetectionManager.SiblingEdlPath(item.Path) is { } edl && System.IO.File.Exists(edl) && _store.IsOwnedEdl(edl))
+            {
+                try
+                {
+                    System.IO.File.Delete(edl);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not delete {Edl}", edl);
+                }
+            }
+
+            _store.Save(itemId, new DetectionRecord(DetectionStatus.NoCommercials, Array.Empty<Jellyfin.Plugin.ComskipSegments.Comskip.CommercialBreak>(), DateTime.UtcNow, "cleared"));
+            _logger.LogInformation("Removed commercials from {Path}; automatic detection will leave it alone", item.Path);
+            return Ok(new ClearResponse(true, "Commercials removed."));
         }
 
         try
