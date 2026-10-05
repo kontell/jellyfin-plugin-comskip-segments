@@ -28,12 +28,14 @@ public sealed record ProgramStartRecord(
     Guid? CardId,
     string Action,          // "marker" or "trim"
     string Message,
-    DateTime UpdatedUtc)
+    DateTime UpdatedUtc,
+    string? BackupPath = null)   // the untouched original a trim kept, for Undo
 {
     public const string SourceManual = "manual";
     public const string SourceCard = "card";
     public const string SourceCardAuto = "card-auto";
     public const string SourceNone = "none";       // looked automatically, no card found
+    public const string SourceUndone = "undone";   // a trim was undone: left alone from now on
 }
 
 /// <summary>

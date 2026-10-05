@@ -215,10 +215,13 @@ public sealed class ProgramStartService
 
         var start = from + (CardFrames.StartAfterCard(frames, hit.Value.End) / (double)CardFrames.FramesPerSecond);
         _logger.LogInformation("Program start: remembered card \"{Label}\" from {Path} at {Seconds:F1}s", card.Label, item.Path, seconds);
+        // Always a skip marker here, whatever the setting: this is where the card is checked
+        // (play it, re-teach it, or Forget it). Trims come from "Find program start" and the
+        // automatic search once the card is trusted — a first trim can't be taken back.
         return await ApplyAsync(
             item, start, ProgramStartRecord.SourceCard, card.Id,
             duplicate is null ? $"after the card at {Clock(seconds)}; card remembered" : $"after the card at {Clock(seconds)}; already remembered as \"{duplicate.Label}\"",
-            job, background: true).ConfigureAwait(false);
+            job, background: true, markerOnly: true).ConfigureAwait(false);
     }
 
     private async Task<ProgramStartResult> FindCoreAsync(BaseItem item, bool automatic, CutJob job, bool background)
@@ -257,7 +260,7 @@ public sealed class ProgramStartService
     /// Marks or trims (per the setting). A trim with <paramref name="background"/> takes the
     /// job over and returns at once ("Cutting from …"); the clients follow it from the cut list.
     /// </summary>
-    private async Task<ProgramStartResult> ApplyAsync(BaseItem item, double start, string source, Guid? cardId, string how, CutJob job, bool background)
+    private async Task<ProgramStartResult> ApplyAsync(BaseItem item, double start, string source, Guid? cardId, string how, CutJob job, bool background, bool markerOnly = false)
     {
         var cfg = Config;
         if (start < 1)
@@ -265,7 +268,7 @@ public sealed class ProgramStartService
             return new ProgramStartResult(false, false, start, "The program starts at the very beginning; nothing to skip.");
         }
 
-        if (cfg.ProgramStartAction != PluginConfiguration.ProgramStartTrim)
+        if (markerOnly || cfg.ProgramStartAction != PluginConfiguration.ProgramStartTrim)
         {
             _store.Save(item.Id, new ProgramStartRecord(start, source, cardId, PluginConfiguration.ProgramStartMarker, how, DateTime.UtcNow));
             await PublishAsync(item, CancellationToken.None).ConfigureAwait(false);
@@ -316,9 +319,93 @@ public sealed class ProgramStartService
         }
 
         // The file now starts (almost) at the program: nothing left to mark.
-        _store.Save(item.Id, new ProgramStartRecord(0, source, cardId, PluginConfiguration.ProgramStartTrim, $"trimmed {lead:F1}s, {how}", DateTime.UtcNow));
+        _store.Save(item.Id, new ProgramStartRecord(0, source, cardId, PluginConfiguration.ProgramStartTrim, $"trimmed {lead:F1}s, {how}", DateTime.UtcNow, outcome.BackupPath));
+        await RefreshAsync(item).ConfigureAwait(false);
         _logger.LogInformation("Program start: trimmed {Lead:F1}s from {Path} ({How})", lead, item.Path, how);
         return new ProgramStartResult(true, true, start, $"Trimmed the first {Clock(lead)} ({how}).");
+    }
+
+    /// <summary>The untouched original a trim kept beside the recording, if there is one.</summary>
+    public static string? BackupOf(BaseItem item)
+    {
+        if (item.Path is not { } path)
+        {
+            return null;
+        }
+
+        var backup = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + ".original" + Path.GetExtension(path));
+        return File.Exists(backup) ? backup : null;
+    }
+
+    /// <summary>
+    /// "Undo trim": puts the kept original back in place of the trimmed recording (a program-start
+    /// or audio-format trim; both keep it as "name.original.ext"), and leaves the recording alone
+    /// afterwards — no automatic program-start or audio trim cuts it again.
+    /// </summary>
+    public async Task<ProgramStartResult> UndoTrimAsync(BaseItem item)
+    {
+        if (BackupOf(item) is not { } backup)
+        {
+            return new ProgramStartResult(false, false, null, "There's no kept original to put back (\"Keep the original file as a backup\" was off when it was cut).");
+        }
+
+        if (!_cuts.TryStart(item, "program-start", out var job))
+        {
+            return Busy();
+        }
+
+        try
+        {
+            job.Phase = CutJob.PhaseFinishing;
+            // Same folder, so a rename: the original replaces the trimmed copy in one step.
+            File.Move(backup, item.Path!, overwrite: true);
+            _store.Save(item.Id, new ProgramStartRecord(0, ProgramStartRecord.SourceUndone, null, string.Empty, "trim undone", DateTime.UtcNow));
+            _serviceProvider.GetService<AudioTrimStore>()?.Save(
+                item.Id, new AudioTrimRecord(AudioTrimStatus.NotNeeded, 0, 0, null, "trim undone; left as recorded", DateTime.UtcNow));
+            _logger.LogInformation("Trim undone: {Path} is back to the original recording", item.Path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not undo the trim of {Path}", item.Path);
+            return new ProgramStartResult(false, false, null, $"Couldn't put the original back: {ex.Message}");
+        }
+        finally
+        {
+            _cuts.Finish(job);
+        }
+
+        await RefreshAsync(item).ConfigureAwait(false);
+        await RedetectAfterTrimAsync(item).ConfigureAwait(false);
+        return new ProgramStartResult(true, false, null, "The original recording is back, uncut. Commercials are looked for again.");
+    }
+
+    // The file changed under the library item (new length): have Jellyfin read it again now,
+    // as the audio-format trim does.
+    private async Task RefreshAsync(BaseItem item)
+    {
+        try
+        {
+            var fileSystem = _serviceProvider.GetService<MediaBrowser.Model.IO.IFileSystem>();
+            if (fileSystem is null)
+            {
+                return;
+            }
+
+            await item.RefreshMetadata(
+                new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(fileSystem))
+                {
+                    MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh,
+                    ImageRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.ValidationOnly,
+                    ReplaceAllMetadata = false,
+                    ForceSave = true,
+                    EnableRemoteContentProbe = true
+                },
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not refresh {Path} after it changed", item.Path);
+        }
     }
 
     // A trim moved every timestamp: old commercial breaks no longer line up. Same handling as a

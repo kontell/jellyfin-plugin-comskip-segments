@@ -347,6 +347,61 @@
     }).catch(function () { return null; });
   }
 
+  // The item's program start: a skip marker to remove, or a kept original to put back.
+  function programStartStatus(itemId) {
+    var apiClient = window.ApiClient;
+    return apiClient.ajax({
+      type: 'GET',
+      url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId),
+      dataType: 'json'
+    }).catch(function () { return null; });
+  }
+
+  function clock(seconds) {
+    var s = Math.round(seconds);
+    var m = Math.floor(s / 60);
+    return m + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  function runRemoveProgramStart(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'DELETE',
+      url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId),
+      dataType: 'json'
+    }).then(function (r) {
+      notify((r && r.Message) || 'Removed.');
+    }).catch(function (err) {
+      failureMessage(err, 'Removing the program start failed.').then(notify);
+    });
+  }
+
+  function runUndoTrim(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'POST',
+      url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + '/Undo'),
+      dataType: 'json'
+    }).then(function (r) {
+      notify((r && r.Message) || 'Done.');
+    }).catch(function (err) {
+      failureMessage(err, 'Undoing the trim failed.').then(notify);
+    });
+  }
+
+  function programStartEntries(status) {
+    var entries = [];
+    if (status && status.Action === 'marker' && status.StartSeconds >= 1) {
+      entries.push({ dataId: 'comskip-remove-start', icon: 'restart_alt', label: 'Remove program start (skips to ' + clock(status.StartSeconds) + ')', run: runRemoveProgramStart });
+    }
+    if (status && status.CanUndo) {
+      entries.push({ dataId: 'comskip-undo-trim', icon: 'undo', label: 'Undo trim (put the original back)', run: runUndoTrim });
+    }
+    return entries;
+  }
+
   function runStopCut(itemId, button) {
     var apiClient = window.ApiClient;
     button.disabled = true;
@@ -389,8 +444,8 @@
       if (!isAdmin) {
         return null;
       }
-      return Promise.all([comskipStatus(itemId), cutFor(itemId)]).then(function (r) {
-        return r[1] ? cuttingEntries(r[1]) : [commercialsEntry(r[0])].concat(MENU_ITEMS.slice(1));
+      return Promise.all([comskipStatus(itemId), cutFor(itemId), programStartStatus(itemId)]).then(function (r) {
+        return r[1] ? cuttingEntries(r[1]) : [commercialsEntry(r[0])].concat(MENU_ITEMS.slice(1), programStartEntries(r[2]));
       });
     }).then(function (entries) {
       if (!entries || scroller.querySelector('[data-id^="comskip-"]')) {

@@ -52,16 +52,24 @@ public sealed class ProgramStartController : ControllerBase
         _serviceProvider = serviceProvider;
     }
 
-    public sealed record StatusResponse(double? StartSeconds, string? Source, string? Action, string? Message, DateTime? UpdatedUtc, int Cards);
+    public sealed record StatusResponse(double? StartSeconds, string? Source, string? Action, string? Message, DateTime? UpdatedUtc, int Cards, bool CanUndo = false);
 
     public sealed record CardResponse(Guid Id, string Label, string? Channel, string? SourcePath, double SourceSeconds, DateTime CreatedUtc);
 
     /// <summary>The item's program start, if any, and how many cards are remembered.</summary>
     [HttpGet("{itemId}")]
-    public ActionResult<StatusResponse> Status([FromRoute] Guid itemId) =>
-        _store.TryGet(itemId, out var r) && r.Source != ProgramStartRecord.SourceNone
-            ? Ok(new StatusResponse(r.StartSeconds, r.Source, r.Action, r.Message, r.UpdatedUtc, _store.Cards.Count))
-            : Ok(new StatusResponse(null, null, null, null, null, _store.Cards.Count));
+    public ActionResult<StatusResponse> Status([FromRoute] Guid itemId)
+    {
+        var canUndo = _libraryManager.GetItemById(itemId) is BaseItem item && ProgramStartService.BackupOf(item) is not null;
+        return _store.TryGet(itemId, out var r) && r.Source is not (ProgramStartRecord.SourceNone or ProgramStartRecord.SourceUndone)
+            ? Ok(new StatusResponse(r.StartSeconds, r.Source, r.Action, r.Message, r.UpdatedUtc, _store.Cards.Count, canUndo))
+            : Ok(new StatusResponse(null, null, null, null, null, _store.Cards.Count, canUndo));
+    }
+
+    /// <summary>"Undo trim": the kept original goes back in place of the trimmed recording.</summary>
+    [HttpPost("{itemId}/Undo")]
+    public Task<ActionResult<ProgramStartResult>> Undo([FromRoute] Guid itemId) =>
+        Run(itemId, item => _service.UndoTrimAsync(item));
 
     /// <summary>"Program starts here": the program begins at <paramref name="seconds"/>.</summary>
     [HttpPost("{itemId}")]
