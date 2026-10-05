@@ -62,7 +62,16 @@
     '.csb-m-pulse{animation:csb-pulse 2s ease-in-out infinite}',
     '.csb-m-spin{position:relative}',
     ".csb-m-spin::after{content:'';position:absolute;top:-4px;right:-4px;bottom:-4px;left:-4px;border-radius:999px;border:2px solid rgba(245,158,11,.3);border-top-color:#f59e0b;animation:csb-spin 1.1s linear infinite}",
-    '@media (prefers-reduced-motion:reduce){.csb-m-pulse,.csb-m-spin::after{animation:none}}'
+    '@media (prefers-reduced-motion:reduce){.csb-m-pulse,.csb-m-spin::after{animation:none}}',
+    // Work in progress over a card (cutting here; JellyDVR Space draws moving the same way).
+    '.jdvr-work{position:absolute;top:0;left:0;right:0;bottom:0;z-index:3;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center;background-color:rgba(0,0,0,.45);background-image:repeating-linear-gradient(-45deg,rgba(var(--jw),.28) 0 10px,transparent 10px 28px);background-size:39.6px 39.6px;animation:jdvr-drift 1.2s linear infinite}',
+    '@keyframes jdvr-drift{from{background-position:0 0}to{background-position:39.6px 0}}',
+    '.jdvr-work-label{background:rgba(0,0,0,.6);color:#fff;font-weight:700;font-size:13px;padding:2px 8px;border-radius:6px;white-space:nowrap}',
+    '.jdvr-work-bar{position:absolute;left:0;right:0;bottom:0;height:5px;background:rgba(0,0,0,.6)}',
+    '.jdvr-work-bar i{display:block;height:100%;background:rgb(var(--jw));transition:width 1.5s}',
+    '.jdvr-work-pill{display:inline-block;margin-left:10px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;color:#fff;background:rgb(var(--jw));animation:csb-pulse 1.4s ease-in-out infinite;vertical-align:middle}',
+    '.jdvr-work-cut{--jw:224,161,0}',
+    '@media (prefers-reduced-motion:reduce){.jdvr-work,.jdvr-work-pill{animation:none}}'
   ].join('\n');
 
   function log(msg) {
@@ -309,6 +318,91 @@
     renderGuide();
   }
 
+  // ---- recordings being cut ---------------------------------------------------------
+  /*
+   * A recording the plugin is cutting (program start, audio format; from a click or after a
+   * recording) gets amber stripes over its card with the phase and percent, and a pulsing tag
+   * in list rows — so nobody starts a second action on it meanwhile. Admins only (the list
+   * comes from GET /ComskipSegments/Cuts): every 2 s while something is being cut, else 10 s.
+   */
+  var cuts = {}; // id without dashes -> job
+  var cutsAt = 0;
+  var cutsAdmin = null;
+
+  function plainId(id) {
+    return (id || '').replace(/-/g, '').toLowerCase();
+  }
+
+  function cutLabel(job) {
+    var pct = job.Bytes > 0 ? Math.min(99, Math.floor(job.DoneBytes * 100 / job.Bytes)) : 0;
+    return job.Phase === 'cutting' ? 'Cutting ' + pct + '%' : job.Phase === 'finishing' ? 'Finishing ' + pct + '%' : 'Checking';
+  }
+
+  function refreshCuts() {
+    var apiClient = window.ApiClient;
+    var wait = Object.keys(cuts).length ? 2000 : 10000;
+    if (!signedIn() || Date.now() - cutsAt < wait - 100) {
+      return;
+    }
+    cutsAt = Date.now();
+    if (!cutsAdmin) {
+      cutsAdmin = apiClient.getCurrentUser()
+        .then(function (u) { return !!(u && u.Policy && u.Policy.IsAdministrator); })
+        .catch(function () { return false; });
+    }
+    cutsAdmin.then(function (admin) {
+      if (!admin) {
+        return;
+      }
+      return getJson('ComskipSegments/Cuts').then(function (list) {
+        var next = {};
+        (list || []).forEach(function (j) {
+          next[plainId(j.ItemId)] = j;
+          if (j.SeriesId && !next[plainId(j.SeriesId)]) {
+            next[plainId(j.SeriesId)] = j;
+          }
+        });
+        cuts = next;
+        window.__comskipCuts = cuts;
+        renderCuts();
+      });
+    }).catch(function () { log('cut list request failed'); });
+  }
+
+  function renderCuts() {
+    visibleTargets().forEach(function (n) {
+      var job = cuts[plainId(n.getAttribute('data-id'))];
+      var host = n.classList.contains('card') ? n.querySelector('.cardScalable') : n.querySelector('.listItemBody > .listItemBodyText');
+      if (!host) {
+        return;
+      }
+      var card = n.classList.contains('card');
+      var el = host.querySelector(card ? ':scope > .jdvr-work-cut' : ':scope > .jdvr-work-pill.jdvr-work-cut');
+      if (!job) {
+        if (el) {
+          el.remove();
+        }
+        return;
+      }
+      var text = '\u2702 ' + cutLabel(job);
+      var pct = job.Bytes > 0 ? Math.min(100, job.DoneBytes * 100 / job.Bytes) : 0;
+      if (!el) {
+        el = document.createElement(card ? 'div' : 'span');
+        el.className = card ? 'jdvr-work jdvr-work-cut' : 'jdvr-work-pill jdvr-work-cut';
+        if (card) {
+          el.innerHTML = '<span class="jdvr-work-label"></span><div class="jdvr-work-bar"><i></i></div>';
+        }
+        host.appendChild(el);
+      }
+      if (card) {
+        el.querySelector('.jdvr-work-label').textContent = text;
+        el.querySelector('.jdvr-work-bar i').style.width = pct + '%';
+      } else {
+        el.textContent = text;
+      }
+    });
+  }
+
   // ---- guide -----------------------------------------------------------------------
 
   function refreshGuide() {
@@ -450,8 +544,10 @@
     scheduled = setTimeout(function () {
       scheduled = null;
       render();
+      renderCuts();
       refreshItems();
       refreshGuide();
+      refreshCuts();
     }, 300);
   }
 
@@ -468,7 +564,8 @@
       var added = mutations[i].addedNodes;
       for (var j = 0; j < added.length; j++) {
         var node = added[j];
-        if (!(node.classList && (node.classList.contains('csb') || node.classList.contains('csb-detail-item')))) {
+        if (!(node.classList && (node.classList.contains('csb') || node.classList.contains('csb-detail-item')
+            || node.classList.contains('jdvr-work') || node.classList.contains('jdvr-work-pill')))) {
           schedule();
           return;
         }
@@ -481,6 +578,17 @@
       schedule();
     }
   }, GUIDE_POLL_MS);
+  // While something is being cut, follow it every 2 s (refreshCuts holds back otherwise).
+  setInterval(function () {
+    if (!document.hidden) {
+      refreshCuts();
+    }
+  }, 2000);
+  // Lets the item menu show its state at once after starting or stopping a cut.
+  window.__comskipCutsRefresh = function () {
+    cutsAt = 0;
+    refreshCuts();
+  };
   schedule();
 
   log('badge script loaded');

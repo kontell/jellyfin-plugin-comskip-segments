@@ -203,6 +203,40 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h2>Program start</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Where a recording's program really begins, past the promos a channel runs first, for channels the audio check can't help with (Starz is 5.1 or stereo throughout). Pause a recording in the web player or JDVR on the program's first frame and press <b>Program starts here</b>, or pause on the card the channel shows just before its programs (Starz's "The following is rated…") and press <b>Remember this card</b>: later recordings then find their start by themselves. Item menus in JDVR also have <b>Find program start</b>.</div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="ProgramStartAction">What to do with the part before the program</label>
+                        <select is="emby-select" id="ProgramStartAction" name="ProgramStartAction" class="emby-select-withcolor emby-select">
+                            <option value="marker">Add a skip marker (the file stays as it is)</option>
+                            <option value="trim">Trim it off the file</option>
+                        </select>
+                        <div class="fieldDescription">A skip marker is a Preview segment from the start of the recording to the program: players offer "Skip preview". Trimming cuts it off with the same safe trim as the audio-format fix (keeping the original as a backup when that's on above), then re-runs commercial detection.</div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input id="ProgramStartAutomatic" name="ProgramStartAutomatic" type="checkbox" is="emby-checkbox" />
+                        <span>Look for remembered cards after each recording</span>
+                    </label>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Also on channels the channel filter keeps from Comskip. Does nothing until a card has been remembered; each recording is looked at once.</div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ProgramStartScanMinutes">Look this far into a recording (minutes)</label>
+                        <input id="ProgramStartScanMinutes" name="ProgramStartScanMinutes" type="number" min="1" max="60" step="1" is="emby-input" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ProgramStartMatchThreshold">How alike a frame must be to a card (0–1)</label>
+                        <input id="ProgramStartMatchThreshold" name="ProgramStartMatchThreshold" type="number" min="0.5" max="0.99" step="0.01" is="emby-input" />
+                        <div class="fieldDescription">0.70 by default. Starz rating cards scored 0.83–0.97 against other films' cards; the closest other frame 0.53.</div>
+                    </div>
+
+                    <h3 style="margin-bottom:0.3em;">Remembered cards</h3>
+                    <div id="ProgramStartCards" class="fieldDescription">Loading…</div>
+                </div>
+
+                <div class="verticalSection">
                     <h2>Existing library (optional)</h2>
 
                     <div class="inputContainer">
@@ -290,6 +324,36 @@
         (function () {
             var pluginUniqueId = "e8f9a7c2-4b3d-4e1a-9c6f-2a1b0c3d4e5f";
 
+            // Remembered program-start cards, each with Forget.
+            function loadStartCards(page) {
+                var box = page.querySelector("#ProgramStartCards");
+                ApiClient.getJSON(ApiClient.getUrl("ComskipSegments/ProgramStart/Cards")).then(function (cards) {
+                    box.innerHTML = "";
+                    if (!cards.length) {
+                        box.textContent = "None yet. Pause on a channel's card in a recording and press \"Remember this card\".";
+                        return;
+                    }
+                    cards.forEach(function (c) {
+                        var row = document.createElement("div");
+                        row.style.cssText = "display:flex;gap:1em;align-items:center;margin:.3em 0;";
+                        var text = document.createElement("span");
+                        var from = (c.SourcePath || "").split("/").pop();
+                        text.textContent = c.Label + (from ? " — from " + from + " at " + Math.floor(c.SourceSeconds / 60) + ":" + ("0" + Math.floor(c.SourceSeconds % 60)).slice(-2) : "");
+                        var forget = document.createElement("button");
+                        forget.type = "button";
+                        forget.className = "emby-button";
+                        forget.setAttribute("is", "emby-button");
+                        forget.textContent = "Forget";
+                        forget.addEventListener("click", function () {
+                            ApiClient.ajax({ type: "DELETE", url: ApiClient.getUrl("ComskipSegments/ProgramStart/Cards/" + c.Id) }).then(function () { loadStartCards(page); });
+                        });
+                        row.appendChild(text);
+                        row.appendChild(forget);
+                        box.appendChild(row);
+                    });
+                }).catch(function () { box.textContent = "Couldn't load the cards."; });
+            }
+
             function load(page, config) {
                 page.querySelector("#ComskipPath").value = config.ComskipPath || "";
                 page.querySelector("#ComskipIniPath").value = config.ComskipIniPath || "";
@@ -320,6 +384,11 @@
                 page.querySelector("#AudioTrimMinCoreFraction").value = config.AudioTrimMinCoreFraction != null ? config.AudioTrimMinCoreFraction : 0.7;
                 page.querySelector("#AudioTrimMinJunkSeconds").value = config.AudioTrimMinJunkSeconds != null ? config.AudioTrimMinJunkSeconds : 5;
                 page.querySelector("#AudioTrimPaddingSeconds").value = config.AudioTrimPaddingSeconds != null ? config.AudioTrimPaddingSeconds : 1.5;
+                page.querySelector("#ProgramStartAction").value = config.ProgramStartAction || "marker";
+                page.querySelector("#ProgramStartAutomatic").checked = config.ProgramStartAutomatic !== false;
+                page.querySelector("#ProgramStartScanMinutes").value = config.ProgramStartScanMinutes || 10;
+                page.querySelector("#ProgramStartMatchThreshold").value = config.ProgramStartMatchThreshold || 0.7;
+                loadStartCards(page);
             }
 
             document.querySelector("#ComskipSegmentsConfigPage")
@@ -526,6 +595,12 @@
                         config.AudioTrimMinJunkSeconds = isNaN(minJunkSeconds) ? 5 : minJunkSeconds;
                         var trimPadding = parseFloat(page.querySelector("#AudioTrimPaddingSeconds").value);
                         config.AudioTrimPaddingSeconds = isNaN(trimPadding) ? 1.5 : trimPadding;
+                        config.ProgramStartAction = page.querySelector("#ProgramStartAction").value;
+                        config.ProgramStartAutomatic = page.querySelector("#ProgramStartAutomatic").checked;
+                        var scanMinutes = parseInt(page.querySelector("#ProgramStartScanMinutes").value, 10);
+                        config.ProgramStartScanMinutes = isNaN(scanMinutes) ? 10 : scanMinutes;
+                        var threshold = parseFloat(page.querySelector("#ProgramStartMatchThreshold").value);
+                        config.ProgramStartMatchThreshold = isNaN(threshold) ? 0.7 : threshold;
 
                         ApiClient.updatePluginConfiguration(pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);

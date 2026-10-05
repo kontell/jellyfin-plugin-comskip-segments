@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.ComskipSegments.Detection;
+using Jellyfin.Plugin.ComskipSegments.ProgramStart;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
@@ -46,17 +47,20 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     private readonly DetectionStore _store;
     private readonly DetectionManager _manager;
     private readonly ILibraryManager _libraryManager;
+    private readonly ProgramStartStore _programStarts;
 
     public ComskipSegmentProvider(
         ILogger<ComskipSegmentProvider> logger,
         DetectionStore store,
         DetectionManager manager,
-        ILibraryManager libraryManager)
+        ILibraryManager libraryManager,
+        ProgramStartStore programStarts)
     {
         _logger = logger;
         _store = store;
         _manager = manager;
         _libraryManager = libraryManager;
+        _programStarts = programStarts;
     }
 
     public string Name => "Comskip Commercial Segments";
@@ -74,7 +78,36 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
         MediaSegmentGenerationRequest request,
         CancellationToken cancellationToken)
     {
-        var itemId = request.ItemId;
+        var segments = CommercialSegments(request.ItemId);
+        return Task.FromResult(WithProgramStart(request.ItemId, segments));
+    }
+
+    /// <summary>
+    /// The promos before a program's start (set in a player, or found by a remembered card),
+    /// as a Preview segment from 0 — players offer "Skip preview" for it.
+    /// </summary>
+    private IReadOnlyList<MediaSegmentDto> WithProgramStart(Guid itemId, IReadOnlyList<MediaSegmentDto> segments)
+    {
+        if (!_programStarts.TryGet(itemId, out var start) || start.StartSeconds < 1)
+        {
+            return segments;
+        }
+
+        var list = new List<MediaSegmentDto>(segments)
+        {
+            new()
+            {
+                ItemId = itemId,
+                Type = MediaSegmentType.Preview,
+                StartTicks = 0,
+                EndTicks = TimeSpan.FromSeconds(start.StartSeconds).Ticks
+            }
+        };
+        return list;
+    }
+
+    private IReadOnlyList<MediaSegmentDto> CommercialSegments(Guid itemId)
+    {
 
         // Not processed yet, but another program (SageTV, Channels DVR, Emby) left an .edl
         // beside the video: use it now, so archives added from elsewhere get their breaks
@@ -83,12 +116,12 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
             && _libraryManager.GetItemById(itemId) is BaseItem item
             && _manager.TryImportSiblingEdl(item, out var imported))
         {
-            return Task.FromResult(ToSegments(itemId, imported));
+            return ToSegments(itemId, imported);
         }
 
         if (_store.TryGet(itemId, out var record) && record.Status == DetectionStatus.Detected)
         {
-            return Task.FromResult(ToSegments(itemId, record));
+            return ToSegments(itemId, record);
         }
 
         // Not yet processed (and not a known Failed/NoCommercials result): kick off
@@ -103,7 +136,7 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
             _manager.Enqueue(itemId);
         }
 
-        return Task.FromResult<IReadOnlyList<MediaSegmentDto>>(Array.Empty<MediaSegmentDto>());
+        return Array.Empty<MediaSegmentDto>();
     }
 
     private static IReadOnlyList<MediaSegmentDto> ToSegments(Guid itemId, DetectionRecord record)

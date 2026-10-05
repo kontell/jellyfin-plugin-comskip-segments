@@ -225,7 +225,7 @@ public sealed class AudioChannelScanner
     /// broadcast's own PCR-derived clock rather than resetting at the start of the
     /// recording — see the remarks on <see cref="ScanChannelRuns"/>.
     /// </summary>
-    private static async Task<(double StartTime, double Duration)> ProbeFormatTimes(
+    internal static async Task<(double StartTime, double Duration)> ProbeFormatTimes(
         string ffprobePath, string mediaPath, CancellationToken cancellationToken)
     {
         var psi = new ProcessStartInfo

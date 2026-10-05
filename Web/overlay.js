@@ -228,6 +228,107 @@
     };
   }
 
+  /*
+   * Program start, while a recording is paused (admins): "Program starts here" on the
+   * program's first frame, or "Remember this card" on the card a channel shows before its
+   * programs (kept, so later recordings from it find their start by themselves). The
+   * position comes from the session's own report, not video.currentTime: jellyfin-web sends
+   * one on pause, and it stays right when a transcode restarted part-way through.
+   */
+  var startPanel = null;
+  var isAdminPromise = null;
+  function isAdmin(apiClient) {
+    if (!isAdminPromise) {
+      isAdminPromise = apiClient.getCurrentUser()
+        .then(function (u) { return !!(u && u.Policy && u.Policy.IsAdministrator); })
+        .catch(function () { return false; });
+    }
+    return isAdminPromise;
+  }
+
+  function pausedPositionSeconds(apiClient) {
+    return apiClient.getSessions({ deviceId: apiClient.deviceId() }).then(function (sessions) {
+      var mine = (sessions || []).filter(function (s) { return s.DeviceId === apiClient.deviceId() && s.NowPlayingItem; })[0];
+      return mine && mine.PlayState ? (mine.PlayState.PositionTicks || 0) / TICKS_PER_SECOND : null;
+    });
+  }
+
+  function notify(message) {
+    if (window.Dashboard && typeof window.Dashboard.alert === 'function') {
+      window.Dashboard.alert(message);
+    } else {
+      log(message);
+    }
+  }
+
+  function programStart(apiClient, itemId, card, button) {
+    button.disabled = true;
+    pausedPositionSeconds(apiClient).then(function (seconds) {
+      if (seconds === null) {
+        throw new Error('no position');
+      }
+      return apiClient.ajax({
+        type: 'POST',
+        url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + (card ? '/Card' : ''), { seconds: seconds.toFixed(2) }),
+        dataType: 'json'
+      });
+    }).then(function (r) {
+      var message = (r && r.Message) || 'Done.';
+      if (r && r.Trimmed) {
+        message += ' Start the recording again to see it.';
+      }
+      notify(message);
+      delete segmentsCache[itemId];
+      if (window.__comskipCutsRefresh) {
+        window.__comskipCutsRefresh();
+      }
+    }).catch(function (err) {
+      // The plugin's own reason ("Already working on this recording…") when it gave one.
+      var reason = err && typeof err.json === 'function'
+        ? err.json().then(function (b) { return (b && b.Message) || 'Setting the program start failed.'; }, function () { return 'Setting the program start failed.'; })
+        : Promise.resolve('Setting the program start failed.');
+      return reason.then(notify);
+    }).then(function () {
+      button.disabled = false;
+    });
+  }
+
+  function updateStartPanel(apiClient, itemId, video) {
+    // Hidden while the recording is being cut (badges.js keeps the cut list): one action on a
+    // file at a time.
+    var cutting = window.__comskipCuts && window.__comskipCuts[(itemId || '').replace(/-/g, '').toLowerCase()];
+    var show = itemId && video && video.paused && liveBreaks.itemId !== itemId && !cutting;
+    if (!show) {
+      if (startPanel) {
+        startPanel.remove();
+        startPanel = null;
+      }
+      return;
+    }
+    isAdmin(apiClient).then(function (admin) {
+      if (!admin || startPanel && startPanel.getAttribute('data-item') === itemId) {
+        return;
+      }
+      if (startPanel) {
+        startPanel.remove();
+      }
+      startPanel = document.createElement('div');
+      startPanel.className = 'comskip-start-panel';
+      startPanel.setAttribute('data-item', itemId);
+      [['Program starts here', false], ['Remember this card', true]].forEach(function (b) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = b[0];
+        button.title = b[1]
+          ? 'Paused on the card this channel shows before its programs: remember it, and start the program after it'
+          : 'Paused on the first frame of the program: everything before it is skipped (or trimmed)';
+        button.onclick = function () { programStart(apiClient, itemId, b[1], button); };
+        startPanel.appendChild(button);
+      });
+      document.body.appendChild(startPanel);
+    });
+  }
+
   function clampPct(n) {
     return Math.max(0, Math.min(100, n));
   }
@@ -243,11 +344,13 @@
       lastItemId = null;
       lastSignature = null;
       updateLiveSkip(null);
+      updateStartPanel(apiClient, null, null);
       return Promise.resolve();
     }
 
     return getNowPlayingItemId(apiClient).then(function (itemId) {
       updateLiveSkip(itemId);
+      updateStartPanel(apiClient, itemId, osd.video);
       if (!itemId) {
         return;
       }

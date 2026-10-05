@@ -4,6 +4,7 @@
  *      the menu opens: "Remove commercials" (comskip-remove) once breaks were found,
  *      "Scanning for commercials…" (disabled) while a scan runs
  *   2. "Fix opening/closing audio format" (audiotrim-apply)
+ *   3. "Find program start" (comskip-program-start): a remembered channel card
  *
  * Injected into jellyfin-web's index.html (see Web/install-overlay.sh, same mechanism
  * as the playback overlay). jellyfin-web has no plugin extension point for the item
@@ -217,6 +218,30 @@
       failureMessage(err, 'Audio-trim request failed — check the feature is enabled in plugin settings.').then(notify);
     }).then(function () {
       button.disabled = false;
+      if (window.__comskipCutsRefresh) {
+        window.__comskipCutsRefresh();
+      }
+    });
+  }
+
+  // "Find program start": a remembered channel card (set from a paused player with "Remember
+  // this card") in the recording's opening minutes; marks or trims per the plugin's setting.
+  function runFindProgramStart(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'POST',
+      url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + '/Find'),
+      dataType: 'json'
+    }).then(function (r) {
+      notify((r && r.Message) || 'Done.');
+    }).catch(function (err) {
+      failureMessage(err, 'Finding the program start failed.').then(notify);
+    }).then(function () {
+      button.disabled = false;
+      if (window.__comskipCutsRefresh) {
+        window.__comskipCutsRefresh();
+      }
     });
   }
 
@@ -300,8 +325,59 @@
       icon: 'graphic_eq',
       label: 'Fix opening/closing audio format',
       run: runAudioTrim
+    },
+    {
+      dataId: 'comskip-program-start',
+      icon: 'start',
+      label: 'Find program start',
+      run: runFindProgramStart
     }
   ];
+
+  // The cut under way on this item (program start, audio format), or null.
+  function cutFor(itemId) {
+    var apiClient = window.ApiClient;
+    return apiClient.ajax({
+      type: 'GET',
+      url: apiClient.getUrl('ComskipSegments/Cuts'),
+      dataType: 'json'
+    }).then(function (list) {
+      var want = (itemId || '').replace(/-/g, '').toLowerCase();
+      return (list || []).filter(function (j) { return (j.ItemId || '').replace(/-/g, '').toLowerCase() === want; })[0] || null;
+    }).catch(function () { return null; });
+  }
+
+  function runStopCut(itemId, button) {
+    var apiClient = window.ApiClient;
+    button.disabled = true;
+    apiClient.ajax({
+      type: 'POST',
+      url: apiClient.getUrl('ComskipSegments/Cuts/' + itemId + '/Stop'),
+      dataType: 'json'
+    }).then(function (r) {
+      notify((r && r.Message) || 'Stopping.');
+    }).catch(function (err) {
+      failureMessage(err, 'Could not stop it.').then(notify);
+    }).then(function () {
+      if (window.__comskipCutsRefresh) {
+        window.__comskipCutsRefresh();
+      }
+    });
+  }
+
+  // While a recording is being cut: its progress, and Stop while the original is untouched —
+  // instead of the entries that would start a second action on the same file.
+  function cuttingEntries(job) {
+    var pct = job.Bytes > 0 ? Math.min(99, Math.floor(job.DoneBytes * 100 / job.Bytes)) : 0;
+    var label = job.Phase === 'cutting' ? 'Cutting\u2026 ' + pct + '%'
+      : job.Phase === 'finishing' ? 'Finishing the cut\u2026 ' + pct + '% (can\u2019t be stopped now)'
+        : 'Checking before cutting\u2026';
+    var entries = [{ dataId: 'comskip-cutting', icon: 'content_cut', label: label, disabled: true }];
+    if (job.Stoppable) {
+      entries.push({ dataId: 'comskip-stop-cut', icon: 'stop_circle', label: 'Stop cutting', run: runStopCut });
+    }
+    return entries;
+  }
 
   function tryInject(scroller) {
     var itemId = getMenuItemId();
@@ -313,8 +389,8 @@
       if (!isAdmin) {
         return null;
       }
-      return comskipStatus(itemId).then(function (status) {
-        return [commercialsEntry(status)].concat(MENU_ITEMS.slice(1));
+      return Promise.all([comskipStatus(itemId), cutFor(itemId)]).then(function (r) {
+        return r[1] ? cuttingEntries(r[1]) : [commercialsEntry(r[0])].concat(MENU_ITEMS.slice(1));
       });
     }).then(function (entries) {
       if (!entries || scroller.querySelector('[data-id^="comskip-"]')) {

@@ -259,4 +259,31 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Show a done/total summary badge on show and season cards.</summary>
     public bool BadgeShowSummary { get; set; } = true;
+
+    public const string ProgramStartMarker = "marker";
+    public const string ProgramStartTrim = "trim";
+
+    /// <summary>
+    /// What happens to the promos before a program's start once it's known (marked in a
+    /// player, or found by a remembered card): "marker" (default) adds a Preview segment from
+    /// 0 to the start, so players offer Skip and the file is untouched; "trim" cuts them off
+    /// the file with the same safe trim as the audio-format fix.
+    /// </summary>
+    public string ProgramStartAction { get; set; } = ProgramStartMarker;
+
+    /// <summary>
+    /// After each recording, look for a remembered program-start card (a channel's rating
+    /// card, say) in its opening minutes. Does nothing until a card has been remembered.
+    /// </summary>
+    public bool ProgramStartAutomatic { get; set; } = true;
+
+    /// <summary>How far into a recording to look for a program-start card (minutes).</summary>
+    public int ProgramStartScanMinutes { get; set; } = 10;
+
+    /// <summary>
+    /// How alike a frame must be to a remembered card to count (0–1, normalized correlation
+    /// of 96×54 greyscale frames). On Starz recordings the cards scored 0.83–0.97 against
+    /// cards from other films and the closest other frame 0.53, so 0.70 sits in the gap.
+    /// </summary>
+    public double ProgramStartMatchThreshold { get; set; } = 0.70;
 }

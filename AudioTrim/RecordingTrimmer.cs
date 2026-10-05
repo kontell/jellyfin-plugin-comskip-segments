@@ -33,7 +33,8 @@ public sealed class RecordingTrimmer
         string recordingPath,
         TrimPlan plan,
         bool keepOriginal,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CutJob? job = null)
     {
         if (!plan.NeedsTrim)
         {
@@ -47,6 +48,13 @@ public sealed class RecordingTrimmer
 
         try
         {
+            if (job is not null)
+            {
+                job.TempPath = tempOutput;
+                job.Bytes = (long)(SafeLength(recordingPath) * (plan.TotalDurationSeconds - plan.LeadTrimSeconds - plan.TrailTrimSeconds) / plan.TotalDurationSeconds);
+                job.Phase = CutJob.PhaseCutting;
+            }
+
             var runResult = await RunFfmpeg(ffmpegPath, recordingPath, tempOutput, plan, cancellationToken).ConfigureAwait(false);
             if (!runResult.Success)
             {
@@ -67,6 +75,15 @@ public sealed class RecordingTrimmer
                 return new TrimOutcome(
                     false, null,
                     $"trimmed output failed a sanity check (expected ~{expectedFraction:P0} of {originalLength} bytes, got {trimmedLength}); left the original untouched");
+            }
+
+            // From here the original is replaced: not stoppable any more (a half-done swap
+            // could leave no playable file).
+            if (job is not null)
+            {
+                job.Bytes = trimmedLength;
+                job.FinalPath = recordingPath;
+                job.Phase = CutJob.PhaseFinishing;
             }
 
             return SwapIntoPlace(recordingPath, tempOutput, keepOriginal);
@@ -132,6 +149,20 @@ public sealed class RecordingTrimmer
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped: ffmpeg would otherwise keep writing a copy nobody will use.
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            _logger.LogInformation("Trim of {Path} stopped", inputPath);
+            return (false, "stopped");
         }
         catch (Exception ex)
         {

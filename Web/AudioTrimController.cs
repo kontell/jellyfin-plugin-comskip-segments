@@ -35,6 +35,7 @@ public sealed class AudioTrimController : ControllerBase
     private readonly DetectionManager _detectionManager;
     private readonly DetectionStore _detectionStore;
     private readonly IServiceProvider _serviceProvider;
+    private readonly CutTracker _cuts;
 
     public AudioTrimController(
         ILogger<AudioTrimController> logger,
@@ -43,8 +44,10 @@ public sealed class AudioTrimController : ControllerBase
         AudioTrimStore audioTrimStore,
         DetectionManager detectionManager,
         DetectionStore detectionStore,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        CutTracker cuts)
     {
+        _cuts = cuts;
         _logger = logger;
         _libraryManager = libraryManager;
         _audioTrim = audioTrim;
@@ -93,23 +96,57 @@ public sealed class AudioTrimController : ControllerBase
             return BadRequest(new ApplyResponse(false, false, 0, 0, "Item has no resolvable file on disk"));
         }
 
-        try
+        // Claimed like the other cuts (one action that may rewrite a recording at a time), and
+        // run in the background: the scan is quick but a cut takes minutes, so the click
+        // returns and the apps follow it in the cut list.
+        if (!_cuts.TryStart(item, "audio-format", out var job))
         {
-            var result = await _audioTrim.ApplyIfNeededAsync(item, cfg, force: true, cancellationToken).ConfigureAwait(false);
+            return Conflict(new ApplyResponse(false, false, 0, 0, "Already working on this recording; wait for that to finish."));
+        }
 
-            if (result.Trimmed && result.LeadTrimSeconds > 0)
+        // Resolved now, while the request's services are alive: a cut can outlast the request,
+        // and its scope is disposed with it (seen live: clearing the old breaks failed after a
+        // trim with "Cannot access a disposed object").
+        var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
+        var work = Task.Run(async () =>
+        {
+            try
             {
-                await InvalidateStaleCommercialBreaks(itemId, cancellationToken).ConfigureAwait(false);
-            }
+                var result = await _audioTrim.ApplyIfNeededAsync(item, cfg, force: true, job.Cancel.Token, job).ConfigureAwait(false);
+                if (result.Trimmed && result.LeadTrimSeconds > 0)
+                {
+                    await InvalidateStaleCommercialBreaks(segmentManager, itemId, CancellationToken.None).ConfigureAwait(false);
+                }
 
-            _logger.LogInformation("Manual audio-trim for {Path}: {Message}", item.Path, result.Message);
-            return Ok(new ApplyResponse(result.Attempted, result.Trimmed, result.LeadTrimSeconds, result.TrailTrimSeconds, result.Message));
-        }
-        catch (Exception ex)
+                _logger.LogInformation("Manual audio-trim for {Path}: {Message}", item.Path, result.Message);
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Manual audio-trim for {Path} stopped", item.Path);
+                return new AudioTrimApplyResult(true, false, 0, 0, "Stopped; the recording is untouched.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled error during manual audio-trim for {Path}", item.Path);
+                return new AudioTrimApplyResult(true, false, 0, 0, $"Unexpected error: {ex.Message}");
+            }
+            finally
+            {
+                _cuts.Finish(job);
+            }
+        });
+
+        // The check takes seconds, so its answer ("uniform, nothing to trim") still comes back
+        // to the click; a cut that runs longer carries on and the apps show its progress. 8 s:
+        // JDVR's client gives up on a silent request after about 10 s.
+        if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(8), cancellationToken)).ConfigureAwait(false) == work)
         {
-            _logger.LogError(ex, "Unhandled error during manual audio-trim for {Path}", item.Path);
-            return StatusCode(500, new ApplyResponse(false, false, 0, 0, $"Unexpected error: {ex.Message}"));
+            var r = await work.ConfigureAwait(false);
+            return Ok(new ApplyResponse(r.Attempted, r.Trimmed, r.LeadTrimSeconds, r.TrailTrimSeconds, r.Message));
         }
+
+        return Ok(new ApplyResponse(true, false, 0, 0, "Cutting the stray audio off. The recording shows the progress, with Stop until the cut copy goes in."));
     }
 
     [HttpGet("Status/{itemId}")]
@@ -130,11 +167,10 @@ public sealed class AudioTrimController : ControllerBase
     /// the pre-trim file are now pointing at the wrong moments. Clear them and force a
     /// fresh Comskip pass against the corrected file.
     /// </summary>
-    private async Task InvalidateStaleCommercialBreaks(Guid itemId, CancellationToken cancellationToken)
+    private async Task InvalidateStaleCommercialBreaks(IMediaSegmentManager segmentManager, Guid itemId, CancellationToken cancellationToken)
     {
         try
         {
-            var segmentManager = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
             await segmentManager.DeleteSegmentsAsync(itemId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)

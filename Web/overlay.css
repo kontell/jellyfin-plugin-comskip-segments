@@ -56,3 +56,35 @@
 .comskip-live-skip:focus {
   background: #00a4dc;
 }
+
+/* Program start buttons while a recording is paused (admins). */
+.comskip-start-panel {
+  position: fixed;
+  left: 4%;
+  bottom: 22%;
+  z-index: 1000;
+  display: flex;
+  gap: 0.6em;
+}
+
+.comskip-start-panel button {
+  padding: 0.6em 1.2em;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.85);
+  color: #fff;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.comskip-start-panel button:hover,
+.comskip-start-panel button:focus {
+  background: #00a4dc;
+}
+
+.comskip-start-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

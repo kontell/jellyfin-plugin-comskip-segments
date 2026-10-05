@@ -56,7 +56,7 @@ public sealed class AudioTrimService
     /// as <see cref="Detection.DetectionManager.Enqueue"/>.
     /// </summary>
     public async Task<AudioTrimApplyResult> ApplyIfNeededAsync(
-        BaseItem item, PluginConfiguration cfg, bool force, CancellationToken cancellationToken)
+        BaseItem item, PluginConfiguration cfg, bool force, CancellationToken cancellationToken, CutJob? job = null)
     {
         if (!force && _store.IsCompleted(item.Id))
         {
@@ -109,7 +109,8 @@ public sealed class AudioTrimService
             item.Path,
             plan,
             cfg.AudioTrimKeepOriginal,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            job).ConfigureAwait(false);
 
         if (!outcome.Success)
         {

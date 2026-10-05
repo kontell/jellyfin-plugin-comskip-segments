@@ -40,6 +40,8 @@ public sealed class DetectionManager : BackgroundService
     private readonly RecordingChannelCache _channelCache;
     private readonly LiveScanCoordinator _liveScanCoordinator;
     private readonly AudioTrimService _audioTrim;
+    private readonly ProgramStart.ProgramStartService _programStart;
+    private readonly CutTracker _cuts;
 
     private readonly Channel<Guid> _queue =
         Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions { SingleReader = false });
@@ -80,8 +82,12 @@ public sealed class DetectionManager : BackgroundService
         DetectionStore store,
         RecordingChannelCache channelCache,
         LiveScanCoordinator liveScanCoordinator,
-        AudioTrimService audioTrim)
+        AudioTrimService audioTrim,
+        ProgramStart.ProgramStartService programStart,
+        CutTracker cuts)
     {
+        _programStart = programStart;
+        _cuts = cuts;
         _logger = logger;
         _libraryManager = libraryManager;
         _serviceProvider = serviceProvider;
@@ -159,6 +165,13 @@ public sealed class DetectionManager : BackgroundService
             if (!DetectionGate.ShouldAutoDetect(item, Config, out var reason, ResolveChannel))
             {
                 _logger.LogDebug("Enqueue skipped for {Path}: {Reason}", item.Path, reason);
+                // Commercial-free channels are kept from Comskip, but their promos before the
+                // program are exactly what a remembered card finds.
+                if (item.Path is not null && !IsStillBeingWritten(item.Path) && _programStart.WantsAutomatic(item))
+                {
+                    _ = Task.Run(() => AutoProgramStart(item, _stoppingToken));
+                }
+
                 return EnqueueResult.Skipped;
             }
 
@@ -289,6 +302,25 @@ public sealed class DetectionManager : BackgroundService
                 _republishPending.TryRemove(itemId, out _);
             }
         });
+    }
+
+    /// <summary>Looks for a remembered program-start card; true when it trimmed the file.</summary>
+    private async Task<bool> AutoProgramStart(BaseItem item, CancellationToken ct)
+    {
+        try
+        {
+            var r = await _programStart.FindAutomaticAsync(item, ct).ConfigureAwait(false);
+            return r.Trimmed;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Program-start search failed for {Path}", item.Path);
+            return false;
+        }
     }
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
@@ -451,7 +483,26 @@ public sealed class DetectionManager : BackgroundService
         {
             try
             {
-                var trimResult = await _audioTrim.ApplyIfNeededAsync(item, cfg, force: false, ct).ConfigureAwait(false);
+                // Claimed like a manual cut: shows as "Cutting" in the apps, and nothing else
+                // rewrites the file meanwhile.
+                AudioTrimApplyResult trimResult;
+                if (_cuts.TryStart(item, "audio-format", out var cutJob))
+                {
+                    try
+                    {
+                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cutJob.Cancel.Token);
+                        trimResult = await _audioTrim.ApplyIfNeededAsync(item, cfg, force: false, linked.Token, cutJob).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        _cuts.Finish(cutJob);
+                    }
+                }
+                else
+                {
+                    trimResult = AudioTrimApplyResult.Skipped;
+                }
+
                 if (trimResult.Trimmed)
                 {
                     audioTrimApplied = true;
@@ -464,6 +515,13 @@ public sealed class DetectionManager : BackgroundService
             {
                 _logger.LogWarning(ex, "Automatic audio-format trim failed for {Path}; continuing with commercial detection on the original file", item.Path);
             }
+        }
+
+        // A remembered program-start card (after the audio check: that one already fixes the
+        // start where the audio format changes). Before Comskip, so a trim comes first.
+        if (!audioTrimApplied && _programStart.WantsAutomatic(item) && await AutoProgramStart(item, ct).ConfigureAwait(false))
+        {
+            audioTrimApplied = true; // the timeline moved: same handling as an audio trim
         }
 
         // If a live Comskip process has been tailing this recording since it started
