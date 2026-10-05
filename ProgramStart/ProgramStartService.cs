@@ -26,8 +26,8 @@ public sealed record ProgramStartResult(bool Ok, bool Trimmed, double? StartSeco
 /// Where a recording's program really starts, past the promos a channel runs before it, for
 /// channels the audio-format check can't help with (Starz is 5.1 or stereo throughout).
 ///
-/// Three ways in: someone pauses on the first frame of the program ("Program starts here");
-/// someone pauses on the card the channel shows just before it ("Remember this card"), which
+/// Three ways in: someone pauses on the first frame of the program ("Starts here (this recording)");
+/// someone pauses on the card the channel shows just before it ("Remember card (all recordings)"), which
 /// is kept so later recordings find their start by themselves; or that search runs on its own
 /// after each recording. The start is then applied per <see cref="PluginConfiguration.ProgramStartAction"/>:
 /// a Preview segment over the promos (default; the provider serves it), or a trim of the file.
@@ -65,12 +65,12 @@ public sealed class ProgramStartService
     private static ProgramStartResult Busy() =>
         new(false, false, null, "Already working on this recording; wait for that to finish.");
 
-    /// <summary>"Program starts here": the start is exactly <paramref name="seconds"/>.</summary>
+    /// <summary>"Starts here (this recording)": the start is exactly <paramref name="seconds"/>.</summary>
     public Task<ProgramStartResult> SetAsync(BaseItem item, double seconds) =>
         Manual(item, job => ApplyAsync(item, seconds, ProgramStartRecord.SourceManual, null, $"marked at {Clock(seconds)}", job, background: true));
 
     /// <summary>
-    /// "Remember this card": keeps the frame at <paramref name="seconds"/> as a card, finds
+    /// "Remember card (all recordings)": keeps the frame at <paramref name="seconds"/> as a card, finds
     /// where the card ends around it, and applies the program start after it.
     /// </summary>
     public Task<ProgramStartResult> RememberCardAsync(BaseItem item, double seconds, string? label, string? channel) =>

@@ -229,8 +229,8 @@
   }
 
   /*
-   * Program start, while a recording is paused (admins): "Program starts here" on the
-   * program's first frame, or "Remember this card" on the card a channel shows before its
+   * Program start, while a recording is paused (admins): "Starts here (this recording)" on the
+   * program's first frame, or "Remember card (all recordings)" on the card a channel shows before its
    * programs (kept, so later recordings from it find their start by themselves). The
    * position comes from the session's own report, not video.currentTime: jellyfin-web sends
    * one on pause, and it stays right when a transcode restarted part-way through.
@@ -315,7 +315,7 @@
       startPanel = document.createElement('div');
       startPanel.className = 'comskip-start-panel';
       startPanel.setAttribute('data-item', itemId);
-      [['Program starts here', false], ['Remember this card', true]].forEach(function (b) {
+      [['Starts here (this recording)', false], ['Remember card (all recordings)', true]].forEach(function (b) {
         var button = document.createElement('button');
         button.type = 'button';
         button.textContent = b[0];
