@@ -64,6 +64,8 @@
   bottom: 22%;
   z-index: 1000;
   display: flex;
+  flex-wrap: wrap;
+  max-width: 92%;
   gap: 0.6em;
 }
 
@@ -82,6 +84,12 @@
 .comskip-start-panel button:hover,
 .comskip-start-panel button:focus {
   background: #00a4dc;
+}
+
+/* Armed: the next press acts; the label says what it will do. */
+.comskip-start-panel button.comskip-armed {
+  background: #b45309;
+  box-shadow: 0 0 0 2px #fbbf24;
 }
 
 .comskip-start-panel button:disabled {

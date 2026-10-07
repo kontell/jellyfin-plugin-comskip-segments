@@ -168,7 +168,13 @@
                         <input id="AudioTrimKeepOriginal" name="AudioTrimKeepOriginal" type="checkbox" is="emby-checkbox" />
                         <span>Keep the original file as a backup</span>
                     </label>
-                    <div class="fieldDescription">Renames the untouched original to <code>&lt;name&gt;.original&lt;ext&gt;</code> next to the corrected file instead of deleting it. Turn off to free the disk space immediately once you trust the result.</div>
+                    <div class="fieldDescription">Keeps the untouched original for good, as a hidden file next to the recording (<code>.&lt;name&gt;.original&lt;ext&gt;</code>; Jellyfin doesn't list hidden files), so "Undo trim" can always put it back. Off: it's kept for the days below, then deleted.</div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="TrimUndoDays">Otherwise, keep it for undo (days)</label>
+                        <input id="TrimUndoDays" name="TrimUndoDays" type="number" min="0" max="365" step="1" is="emby-input" />
+                        <div class="fieldDescription">When the box above is off: how long a trim can be undone (a mistaken or curious press) before its original is deleted. 0 deletes it as soon as the trimmed file is in place. Applies to every trim: program start and audio format.</div>
+                    </div>
 
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="AudioTrimMinCoreFraction">Minimum core fraction</label>
@@ -204,7 +210,7 @@
 
                 <div class="verticalSection">
                     <h2>Program start</h2>
-                    <div class="fieldDescription" style="margin-bottom:1em;">Where a recording's program really begins, past the promos a channel runs first, for channels the audio check can't help with (Starz is 5.1 or stereo throughout). Pause a recording in the web player or JDVR on the program's first frame and press <b>Starts here (this recording)</b>, or pause on the card the channel shows just before its programs (Starz's "The following is rated…") and press <b>Remember card (all recordings)</b>: that recording only gets a skip marker (whatever the setting below), so you can check where it lands; later recordings then find their start by themselves, marked or trimmed per the setting. A recording's "…" menu also has <b>Remove program start</b> (for a marker) and <b>Undo trim</b> (when the original was kept). Item menus in JDVR also have <b>Find program start</b>.</div>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Where a recording's program really begins, past the promos a channel runs first, for channels the audio check can't help with (Starz is 5.1 or stereo throughout). Pause a recording in the web player or JDVR on the program's first frame, press <b>✂ Edit</b>, then <b>Starts here (this recording)</b> (each action asks for a second press that says what it will do), or pause on the card the channel shows just before its programs (Starz's "The following is rated…") and press <b>Remember card (all recordings)</b>: that recording only gets a skip marker (whatever the setting below), so you can check where it lands; later recordings then find their start by themselves, marked or trimmed per the setting. A recording's "…" menu also has <b>Remove program start</b> (for a marker) and <b>Undo trim</b> (when the original was kept). Item menus in JDVR also have <b>Find program start</b>.</div>
 
                     <div class="selectContainer">
                         <label class="selectLabel" for="ProgramStartAction">What to do with the part before the program</label>
@@ -234,6 +240,12 @@
 
                     <h3 style="margin-bottom:0.3em;">Remembered cards</h3>
                     <div id="ProgramStartCards" class="fieldDescription">Loading…</div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2>Who can edit recordings</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">Program start (<b>Starts here</b>, <b>Remember card</b>, <b>Find program start</b>, <b>Remove program start</b>), trims and <b>Undo trim</b>, the audio format fix, and scanning for or removing commercials. Administrators always can. Anyone else sees no edit buttons in the web player, its item menus or JDVR, and the server refuses them.</div>
+                    <div id="RecordingEditors">Loading users…</div>
                 </div>
 
                 <div class="verticalSection">
@@ -354,6 +366,35 @@
                 }).catch(function () { box.textContent = "Couldn't load the cards."; });
             }
 
+            // Who can edit recordings: a box per user; administrators always can (shown ticked, fixed).
+            function loadEditors(page, allowed) {
+                var box = page.querySelector("#RecordingEditors");
+                var ids = allowed.map(function (id) { return String(id).replace(/-/g, "").toLowerCase(); });
+                ApiClient.getUsers().then(function (users) {
+                    box.innerHTML = "";
+                    users.forEach(function (u) {
+                        var admin = !!(u.Policy && u.Policy.IsAdministrator);
+                        var label = document.createElement("label");
+                        label.className = "checkboxContainer";
+                        var input = document.createElement("input");
+                        input.type = "checkbox";
+                        input.setAttribute("is", "emby-checkbox");
+                        if (admin) {
+                            input.checked = true;
+                            input.disabled = true;
+                        } else {
+                            input.setAttribute("data-user", u.Id);
+                            input.checked = ids.indexOf(String(u.Id).replace(/-/g, "").toLowerCase()) !== -1;
+                        }
+                        var text = document.createElement("span");
+                        text.textContent = u.Name + (admin ? " (administrator)" : "");
+                        label.appendChild(input);
+                        label.appendChild(text);
+                        box.appendChild(label);
+                    });
+                }).catch(function () { box.textContent = "Couldn't load the users."; });
+            }
+
             function load(page, config) {
                 page.querySelector("#ComskipPath").value = config.ComskipPath || "";
                 page.querySelector("#ComskipIniPath").value = config.ComskipIniPath || "";
@@ -381,6 +422,8 @@
                 page.querySelector("#EnableAudioFormatTrim").checked = !!config.EnableAudioFormatTrim;
                 page.querySelector("#AudioTrimAutomaticApply").checked = !!config.AudioTrimAutomaticApply;
                 page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal !== false;
+                page.querySelector("#TrimUndoDays").value = config.TrimUndoDays != null ? config.TrimUndoDays : 7;
+                loadEditors(page, config.RecordingEditorUserIds || []);
                 page.querySelector("#AudioTrimMinCoreFraction").value = config.AudioTrimMinCoreFraction != null ? config.AudioTrimMinCoreFraction : 0.7;
                 page.querySelector("#AudioTrimMinJunkSeconds").value = config.AudioTrimMinJunkSeconds != null ? config.AudioTrimMinJunkSeconds : 5;
                 page.querySelector("#AudioTrimPaddingSeconds").value = config.AudioTrimPaddingSeconds != null ? config.AudioTrimPaddingSeconds : 1.5;
@@ -589,6 +632,11 @@
                         config.EnableAudioFormatTrim = page.querySelector("#EnableAudioFormatTrim").checked;
                         config.AudioTrimAutomaticApply = page.querySelector("#AudioTrimAutomaticApply").checked;
                         config.AudioTrimKeepOriginal = page.querySelector("#AudioTrimKeepOriginal").checked;
+                        var undoDays = parseInt(page.querySelector("#TrimUndoDays").value, 10);
+                        config.TrimUndoDays = isNaN(undoDays) ? 7 : Math.max(0, undoDays);
+                        config.RecordingEditorUserIds = Array.prototype.map.call(
+                            page.querySelectorAll("#RecordingEditors input[data-user]:checked"),
+                            function (box) { return box.getAttribute("data-user"); });
                         var minCoreFraction = parseFloat(page.querySelector("#AudioTrimMinCoreFraction").value);
                         config.AudioTrimMinCoreFraction = isNaN(minCoreFraction) ? 0.7 : minCoreFraction;
                         var minJunkSeconds = parseFloat(page.querySelector("#AudioTrimMinJunkSeconds").value);

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.ComskipSegments.Editing;
 using MediaBrowser.Common.Api;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -25,7 +26,8 @@ namespace Jellyfin.Plugin.ComskipSegments.Web;
 /// </summary>
 [ApiController]
 [Route("ComskipSegments")]
-[Authorize(Policy = Policies.RequiresElevation)]
+[Authorize]
+[RecordingEditor]
 public sealed class ComskipSegmentsController : ControllerBase
 {
     private readonly ILogger<ComskipSegmentsController> _logger;
@@ -58,7 +60,9 @@ public sealed class ComskipSegmentsController : ControllerBase
 
     public sealed record StatusResponse(bool InFlight, string? Status, int? BreakCount, DateTime? UpdatedUtc, string? Source = null);
 
+    // The config page's path check: administrators only, like the page.
     [HttpPost("Validate")]
+    [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult<ValidateResponse> Validate([FromBody] ValidateRequest request)
     {
         return Ok(new ValidateResponse(

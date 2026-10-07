@@ -327,7 +327,6 @@
    */
   var cuts = {}; // id without dashes -> job
   var cutsAt = 0;
-  var cutsAdmin = null;
 
   function plainId(id) {
     return (id || '').replace(/-/g, '').toLowerCase();
@@ -339,21 +338,13 @@
   }
 
   function refreshCuts() {
-    var apiClient = window.ApiClient;
     var wait = Object.keys(cuts).length ? 2000 : 10000;
     if (!signedIn() || Date.now() - cutsAt < wait - 100) {
       return;
     }
     cutsAt = Date.now();
-    if (!cutsAdmin) {
-      cutsAdmin = apiClient.getCurrentUser()
-        .then(function (u) { return !!(u && u.Policy && u.Policy.IsAdministrator); })
-        .catch(function () { return false; });
-    }
-    cutsAdmin.then(function (admin) {
-      if (!admin) {
-        return;
-      }
+    // Everyone signed in sees what's being cut (stopping a cut is for editors only).
+    Promise.resolve().then(function () {
       return getJson('ComskipSegments/Cuts').then(function (list) {
         var next = {};
         (list || []).forEach(function (j) {

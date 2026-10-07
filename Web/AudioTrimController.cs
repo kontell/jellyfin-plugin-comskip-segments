@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.AudioTrim;
 using Jellyfin.Plugin.ComskipSegments.Detection;
-using MediaBrowser.Common.Api;
+using Jellyfin.Plugin.ComskipSegments.Editing;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
 using Microsoft.AspNetCore.Authorization;
@@ -25,7 +25,8 @@ namespace Jellyfin.Plugin.ComskipSegments.Web;
 /// </summary>
 [ApiController]
 [Route("ComskipSegments/AudioTrim")]
-[Authorize(Policy = Policies.RequiresElevation)]
+[Authorize]
+[RecordingEditor]
 public sealed class AudioTrimController : ControllerBase
 {
     private readonly ILogger<AudioTrimController> _logger;

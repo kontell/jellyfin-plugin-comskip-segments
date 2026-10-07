@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ComskipSegments.Editing;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ComskipSegments.AudioTrim;
@@ -24,8 +25,13 @@ public sealed record TrimOutcome(bool Success, string? BackupPath, string Messag
 public sealed class RecordingTrimmer
 {
     private readonly ILogger<RecordingTrimmer> _logger;
+    private readonly TrimBackups _backups;
 
-    public RecordingTrimmer(ILogger<RecordingTrimmer> logger) => _logger = logger;
+    public RecordingTrimmer(ILogger<RecordingTrimmer> logger, TrimBackups backups)
+    {
+        _logger = logger;
+        _backups = backups;
+    }
 
     public async Task<TrimOutcome> ApplyAsync(
         string ffmpegPath,
@@ -182,26 +188,31 @@ public sealed class RecordingTrimmer
     }
 
     /// <summary>
-    /// Renames the original aside (or deletes it, per <paramref name="keepOriginal"/>) and
-    /// moves the trimmed file into its exact place. The trimmed file may be on a different
-    /// filesystem than the recordings folder (the work directory doesn't have to be the
-    /// same volume), so falls back to copy+delete when a plain rename can't cross volumes.
+    /// Renames the original aside as the hidden backup (see <see cref="TrimBackups"/>) and moves
+    /// the trimmed file into its exact place. The backup is kept for good with
+    /// <paramref name="keepOriginal"/>, otherwise for the configured undo days (or deleted
+    /// right away when that's 0). The trimmed file may be on a different filesystem than the
+    /// recordings folder (the work directory doesn't have to be the same volume), so falls back
+    /// to copy+delete when a plain rename can't cross volumes.
     /// </summary>
     private TrimOutcome SwapIntoPlace(string recordingPath, string trimmedPath, bool keepOriginal)
     {
-        var dir = Path.GetDirectoryName(recordingPath)!;
-        var backupPath = Path.Combine(
-            dir, Path.GetFileNameWithoutExtension(recordingPath) + ".original" + Path.GetExtension(recordingPath));
+        // A second cut of the same recording (an audio fix, then a program start): the backup
+        // already holds the recording as it was recorded, which is what Undo should bring back,
+        // so the once-cut file is dropped instead of becoming the backup.
+        var earlier = TrimBackups.Find(recordingPath);
+        var backupPath = earlier ?? TrimBackups.PathFor(recordingPath);
 
         try
         {
-            if (File.Exists(backupPath))
+            if (earlier is not null)
             {
-                // Leftover from an earlier attempt on this item — never silently clobber it.
-                File.Delete(backupPath);
+                File.Delete(recordingPath);
             }
-
-            File.Move(recordingPath, backupPath);
+            else
+            {
+                File.Move(recordingPath, backupPath);
+            }
         }
         catch (Exception ex)
         {
@@ -229,13 +240,27 @@ public sealed class RecordingTrimmer
             return new TrimOutcome(false, null, $"could not move trimmed file into place: {ex.Message}");
         }
 
-        if (!keepOriginal)
+        if (keepOriginal)
+        {
+            _backups.Forget(backupPath);
+            return new TrimOutcome(true, backupPath, $"trim applied; original kept at {backupPath}");
+        }
+
+        var days = Plugin.Instance?.Configuration.TrimUndoDays ?? 0;
+        if (days <= 0)
         {
             TryDelete(backupPath);
+            _backups.Forget(backupPath);
             return new TrimOutcome(true, null, "trim applied; original discarded");
         }
 
-        return new TrimOutcome(true, backupPath, $"trim applied; original kept at {backupPath}");
+        // A second cut keeps the first one's deadline: the original has been waiting since then.
+        if (_backups.ExpiresUtc(backupPath) is null)
+        {
+            _backups.Expire(backupPath, DateTime.UtcNow.AddDays(days));
+        }
+
+        return new TrimOutcome(true, backupPath, $"trim applied; original kept {days} days for Undo at {backupPath}");
     }
 
     private static void MoveAcrossVolumes(string source, string destination)

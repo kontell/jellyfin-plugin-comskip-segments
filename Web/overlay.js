@@ -229,21 +229,25 @@
   }
 
   /*
-   * Program start, while a recording is paused (admins): "Starts here (this recording)" on the
-   * program's first frame, or "Remember card (all recordings)" on the card a channel shows before its
-   * programs (kept, so later recordings from it find their start by themselves). The
-   * position comes from the session's own report, not video.currentTime: jellyfin-web sends
-   * one on pause, and it stays right when a transcode restarted part-way through.
+   * Editing a recording, while it's paused (administrators, and users allowed on the plugin's
+   * config page): one "✂ Edit" button, which opens the actions. "Starts here (this recording)"
+   * on the program's first frame, "Remember card (all recordings)" on the card a channel shows
+   * before its programs (kept, so later recordings from it find their start by themselves),
+   * and, when there's one, "Remove program start" and "Undo trim". Each action asks for a
+   * second press that says what it will do, so a stray click changes nothing. The position
+   * comes from the session's own report, not video.currentTime: jellyfin-web sends one on
+   * pause, and it stays right when a transcode restarted part-way through.
    */
   var startPanel = null;
-  var isAdminPromise = null;
-  function isAdmin(apiClient) {
-    if (!isAdminPromise) {
-      isAdminPromise = apiClient.getCurrentUser()
-        .then(function (u) { return !!(u && u.Policy && u.Policy.IsAdministrator); })
-        .catch(function () { return false; });
+  var editOpen = false;
+  var editingPromise = null;
+  // { CanEdit, ProgramStartTrims, KeepOriginal, UndoDays } for the signed-in user.
+  function editing(apiClient) {
+    if (!editingPromise) {
+      editingPromise = apiClient.getJSON(apiClient.getUrl('ComskipSegments/Editing'))
+        .catch(function () { return { CanEdit: false }; });
     }
-    return isAdminPromise;
+    return editingPromise;
   }
 
   function pausedPositionSeconds(apiClient) {
@@ -261,9 +265,37 @@
     }
   }
 
-  function programStart(apiClient, itemId, card, button) {
-    button.disabled = true;
-    pausedPositionSeconds(apiClient).then(function (seconds) {
+  function clock(seconds) {
+    var s = Math.round(seconds || 0);
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  // How a trim can be taken back, for the confirmations.
+  function undoNote(info) {
+    if (info.KeepOriginal) {
+      return 'Undo trim puts it back.';
+    }
+    return info.UndoDays > 0
+      ? 'Undo trim can put it back for ' + info.UndoDays + ' day' + (info.UndoDays === 1 ? '' : 's') + '.'
+      : 'This can\'t be undone.';
+  }
+
+  function failure(err, fallback) {
+    // The plugin's own reason ("Already working on this recording…") when it gave one.
+    return err && typeof err.json === 'function'
+      ? err.json().then(function (b) { return (b && b.Message) || fallback; }, function () { return fallback; })
+      : Promise.resolve(fallback);
+  }
+
+  function changed(itemId) {
+    delete segmentsCache[itemId];
+    if (window.__comskipCutsRefresh) {
+      window.__comskipCutsRefresh();
+    }
+  }
+
+  function programStart(apiClient, itemId, card) {
+    return pausedPositionSeconds(apiClient).then(function (seconds) {
       if (seconds === null) {
         throw new Error('no position');
       }
@@ -278,19 +310,124 @@
         message += ' Start the recording again to see it.';
       }
       notify(message);
-      delete segmentsCache[itemId];
-      if (window.__comskipCutsRefresh) {
-        window.__comskipCutsRefresh();
-      }
-    }).catch(function (err) {
-      // The plugin's own reason ("Already working on this recording…") when it gave one.
-      var reason = err && typeof err.json === 'function'
-        ? err.json().then(function (b) { return (b && b.Message) || 'Setting the program start failed.'; }, function () { return 'Setting the program start failed.'; })
-        : Promise.resolve('Setting the program start failed.');
-      return reason.then(notify);
-    }).then(function () {
-      button.disabled = false;
+      changed(itemId);
+    }, function (err) {
+      return failure(err, 'Setting the program start failed.').then(notify);
     });
+  }
+
+  function simple(apiClient, itemId, type, path, fallback, after) {
+    return apiClient.ajax({ type: type, url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + path), dataType: 'json' })
+      .then(function (r) {
+        notify((r && r.Message) || 'Done.' + (after || ''));
+        changed(itemId);
+      }, function (err) {
+        return failure(err, fallback).then(notify);
+      });
+  }
+
+  // A button that acts on its second press: the first shows what will happen (for 4 s).
+  function armedButton(label, confirmLabel, run) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    var timer = null;
+    button.onclick = function () {
+      if (!button.classList.contains('comskip-armed')) {
+        button.classList.add('comskip-armed');
+        button.textContent = confirmLabel;
+        timer = setTimeout(function () {
+          button.classList.remove('comskip-armed');
+          button.textContent = label;
+        }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      button.classList.remove('comskip-armed');
+      button.textContent = label;
+      button.disabled = true;
+      Promise.resolve(run()).then(function () {
+        button.disabled = false;
+        closeEdit();
+      });
+    };
+    return button;
+  }
+
+  function closeEdit() {
+    editOpen = false;
+    if (startPanel) {
+      startPanel.remove();
+      startPanel = null;
+    }
+  }
+
+  function buildPanel(apiClient, itemId, info) {
+    var panel = document.createElement('div');
+    panel.className = 'comskip-start-panel';
+    panel.setAttribute('data-item', itemId);
+    panel.setAttribute('data-open', editOpen ? '1' : '0');
+
+    if (!editOpen) {
+      var edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = '✂ Edit';
+      edit.title = 'Program start, trims and their undo for this recording';
+      edit.onclick = function () {
+        editOpen = true;
+        if (startPanel) {
+          startPanel.remove();
+          startPanel = null;
+        }
+        showPanel(apiClient, itemId, info);
+      };
+      panel.appendChild(edit);
+      return Promise.resolve(panel);
+    }
+
+    return apiClient.getJSON(apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId)).catch(function () { return null; }).then(function (status) {
+      panel.appendChild(armedButton(
+        'Starts here (this recording)',
+        info.ProgramStartTrims
+          ? 'Press again: cut everything before this point. ' + undoNote(info)
+          : 'Press again: skip to here from the start (Remove program start takes it off)',
+        function () { return programStart(apiClient, itemId, false); }));
+      panel.appendChild(armedButton(
+        'Remember card (all recordings)',
+        'Press again: remember this card; recordings from this channel find their start by it (Forget it on the plugin page)',
+        function () { return programStart(apiClient, itemId, true); }));
+      if (status && status.Action === 'marker' && status.StartSeconds >= 1) {
+        panel.appendChild(armedButton(
+          'Remove program start (skips to ' + clock(status.StartSeconds) + ')',
+          'Press again: play from the very start again',
+          function () { return simple(apiClient, itemId, 'DELETE', '', 'Removing the program start failed.'); }));
+      }
+      if (status && status.CanUndo) {
+        panel.appendChild(armedButton(
+          'Undo trim' + (status.UndoUntil ? ' (until ' + new Date(status.UndoUntil).toLocaleDateString() + ')' : ''),
+          'Press again: put the original recording back',
+          function () { return simple(apiClient, itemId, 'POST', '/Undo', 'Undoing the trim failed.', ' Start the recording again to see it.'); }));
+      }
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.textContent = 'Close';
+      close.onclick = closeEdit;
+      panel.appendChild(close);
+      return panel;
+    });
+  }
+
+  var building = false;
+  function showPanel(apiClient, itemId, info) {
+    building = true;
+    buildPanel(apiClient, itemId, info).then(function (panel) {
+      building = false;
+      if (startPanel) {
+        startPanel.remove();
+      }
+      startPanel = panel;
+      document.body.appendChild(panel);
+    }, function () { building = false; });
   }
 
   function updateStartPanel(apiClient, itemId, video) {
@@ -299,33 +436,17 @@
     var cutting = window.__comskipCuts && window.__comskipCuts[(itemId || '').replace(/-/g, '').toLowerCase()];
     var show = itemId && video && video.paused && liveBreaks.itemId !== itemId && !cutting;
     if (!show) {
-      if (startPanel) {
-        startPanel.remove();
-        startPanel = null;
-      }
+      closeEdit();
       return;
     }
-    isAdmin(apiClient).then(function (admin) {
-      if (!admin || startPanel && startPanel.getAttribute('data-item') === itemId) {
+    editing(apiClient).then(function (info) {
+      if (!info || !info.CanEdit || building || startPanel && startPanel.getAttribute('data-item') === itemId) {
         return;
       }
-      if (startPanel) {
-        startPanel.remove();
+      if (startPanel && startPanel.getAttribute('data-item') !== itemId) {
+        closeEdit();
       }
-      startPanel = document.createElement('div');
-      startPanel.className = 'comskip-start-panel';
-      startPanel.setAttribute('data-item', itemId);
-      [['Starts here (this recording)', false], ['Remember card (all recordings)', true]].forEach(function (b) {
-        var button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = b[0];
-        button.title = b[1]
-          ? 'Paused on the card this channel shows before its programs: remember it, and start the program after it'
-          : 'Paused on the first frame of the program: everything before it is skipped (or trimmed)';
-        button.onclick = function () { programStart(apiClient, itemId, b[1], button); };
-        startPanel.appendChild(button);
-      });
-      document.body.appendChild(startPanel);
+      showPanel(apiClient, itemId, info);
     });
   }
 

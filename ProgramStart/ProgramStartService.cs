@@ -326,27 +326,18 @@ public sealed class ProgramStartService
     }
 
     /// <summary>The untouched original a trim kept beside the recording, if there is one.</summary>
-    public static string? BackupOf(BaseItem item)
-    {
-        if (item.Path is not { } path)
-        {
-            return null;
-        }
-
-        var backup = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + ".original" + Path.GetExtension(path));
-        return File.Exists(backup) ? backup : null;
-    }
+    public static string? BackupOf(BaseItem item) => Editing.TrimBackups.Find(item.Path);
 
     /// <summary>
     /// "Undo trim": puts the kept original back in place of the trimmed recording (a program-start
-    /// or audio-format trim; both keep it as "name.original.ext"), and leaves the recording alone
+    /// or audio-format trim; both keep it the same way, see <see cref="Editing.TrimBackups"/>), and leaves the recording alone
     /// afterwards — no automatic program-start or audio trim cuts it again.
     /// </summary>
     public async Task<ProgramStartResult> UndoTrimAsync(BaseItem item)
     {
         if (BackupOf(item) is not { } backup)
         {
-            return new ProgramStartResult(false, false, null, "There's no kept original to put back (\"Keep the original file as a backup\" was off when it was cut).");
+            return new ProgramStartResult(false, false, null, "There's no kept original to put back: it was cut without keeping one, or its undo time is up.");
         }
 
         if (!_cuts.TryStart(item, "program-start", out var job))
@@ -359,6 +350,7 @@ public sealed class ProgramStartService
             job.Phase = CutJob.PhaseFinishing;
             // Same folder, so a rename: the original replaces the trimmed copy in one step.
             File.Move(backup, item.Path!, overwrite: true);
+            _serviceProvider.GetService<Editing.TrimBackups>()?.Forget(backup);
             _store.Save(item.Id, new ProgramStartRecord(0, ProgramStartRecord.SourceUndone, null, string.Empty, "trim undone", DateTime.UtcNow));
             _serviceProvider.GetService<AudioTrimStore>()?.Save(
                 item.Id, new AudioTrimRecord(AudioTrimStatus.NotNeeded, 0, 0, null, "trim undone; left as recorded", DateTime.UtcNow));

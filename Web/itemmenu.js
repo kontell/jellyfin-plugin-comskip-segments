@@ -24,7 +24,7 @@
  *   - `window.Dashboard.alert(message)` exists globally (not just on the plugin config
  *     page) and shows a dismissible in-page modal — not a native browser dialog, so it's
  *     safe to use for feedback here.
- *   - `window.ApiClient.getCurrentUser()` resolves a user with `.Policy.IsAdministrator`.
+ *   - `ComskipSegments/Editing` (this plugin) says whether the user may edit recordings.
  * If this breaks after a jellyfin-web update, re-check these against the running client
  * (open the item details page, click "...", inspect the action sheet in devtools).
  *
@@ -48,7 +48,7 @@
 (function () {
   'use strict';
 
-  var isAdminPromise = null;
+  var canEditPromise = null;
 
   function log(msg) {
     if (window.console && window.console.debug) {
@@ -64,16 +64,17 @@
     }
   }
 
-  function checkIsAdmin() {
-    if (!isAdminPromise) {
+  // Administrators, and the users the plugin's config page allows to edit recordings.
+  function checkCanEdit() {
+    if (!canEditPromise) {
       var apiClient = window.ApiClient;
-      isAdminPromise = apiClient && apiClient.getCurrentUser
-        ? apiClient.getCurrentUser()
-          .then(function (u) { return !!(u && u.Policy && u.Policy.IsAdministrator); })
+      canEditPromise = apiClient
+        ? apiClient.getJSON(apiClient.getUrl('ComskipSegments/Editing'))
+          .then(function (r) { return !!(r && r.CanEdit); })
           .catch(function () { return false; })
         : Promise.resolve(false);
     }
-    return isAdminPromise;
+    return canEditPromise;
   }
 
   // The item whose "..." was clicked last (null = the details page's own "..."), and when.
@@ -397,7 +398,8 @@
       entries.push({ dataId: 'comskip-remove-start', icon: 'restart_alt', label: 'Remove program start (skips to ' + clock(status.StartSeconds) + ')', run: runRemoveProgramStart });
     }
     if (status && status.CanUndo) {
-      entries.push({ dataId: 'comskip-undo-trim', icon: 'undo', label: 'Undo trim (put the original back)', run: runUndoTrim });
+      var until = status.UndoUntil ? ', until ' + new Date(status.UndoUntil).toLocaleDateString() : '';
+      entries.push({ dataId: 'comskip-undo-trim', icon: 'undo', label: 'Undo trim (put the original back' + until + ')', run: runUndoTrim });
     }
     return entries;
   }
@@ -440,8 +442,8 @@
       return;
     }
 
-    checkIsAdmin().then(function (isAdmin) {
-      if (!isAdmin) {
+    checkCanEdit().then(function (canEdit) {
+      if (!canEdit) {
         return null;
       }
       return Promise.all([comskipStatus(itemId), cutFor(itemId), programStartStatus(itemId)]).then(function (r) {
@@ -449,7 +451,7 @@
       });
     }).then(function (entries) {
       if (!entries || scroller.querySelector('[data-id^="comskip-"]')) {
-        return; // not an admin, or already injected (this can fire more than once per open)
+        return; // may not edit recordings, or already injected (this can fire more than once per open)
       }
 
       entries.forEach(function (entry) {

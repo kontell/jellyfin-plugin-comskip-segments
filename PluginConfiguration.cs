@@ -1,3 +1,4 @@
+using System;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.ComskipSegments.Configuration;
@@ -218,6 +219,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// place, saving disk space immediately.
     /// </summary>
     public bool AudioTrimKeepOriginal { get; set; } = true;
+
+    /// <summary>
+    /// When <see cref="AudioTrimKeepOriginal"/> is off: keep the original this many days anyway,
+    /// so "Undo trim" can put it back after a mistaken or curious press, then delete it. 0 deletes
+    /// it as soon as the trimmed file is in place. Applies to every trim (program start, audio).
+    /// </summary>
+    public int TrimUndoDays { get; set; } = 7;
+
+    /// <summary>
+    /// Users (Jellyfin user ids) besides administrators who may edit recordings: program start,
+    /// remembered cards, trims and their undo, the audio fix, and scanning for or removing
+    /// commercials. Administrators always may; everyone else sees no edit buttons.
+    /// </summary>
+    public string[] RecordingEditorUserIds { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// The contiguous audio-format run that contains the temporal midpoint of the recording

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.ProgramStart;
-using MediaBrowser.Common.Api;
+using Jellyfin.Plugin.ComskipSegments.Editing;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
@@ -17,13 +17,15 @@ namespace Jellyfin.Plugin.ComskipSegments.Web;
 
 /// <summary>
 /// Program start, for the players' "Program starts here" / "Remember this card" buttons and
-/// the item menus' "Find program start". Admin only: it can trim recordings. Synchronous like
+/// the item menus' "Find program start". Administrators and the users allowed to edit recordings
+/// (see <see cref="RecordingEditors"/>): it can trim recordings. Synchronous like
 /// the audio-trim endpoint — the work is a few seconds of decoding, and the point of a click
 /// is to see what it did.
 /// </summary>
 [ApiController]
 [Route("ComskipSegments/ProgramStart")]
-[Authorize(Policy = Policies.RequiresElevation)]
+[Authorize]
+[RecordingEditor]
 public sealed class ProgramStartController : ControllerBase
 {
     private readonly ILogger<ProgramStartController> _logger;
@@ -33,6 +35,7 @@ public sealed class ProgramStartController : ControllerBase
     private readonly DetectionManager _detectionManager;
     private readonly DetectionStore _detectionStore;
     private readonly IServiceProvider _serviceProvider;
+    private readonly TrimBackups _backups;
 
     public ProgramStartController(
         ILogger<ProgramStartController> logger,
@@ -41,8 +44,10 @@ public sealed class ProgramStartController : ControllerBase
         ProgramStartStore store,
         DetectionManager detectionManager,
         DetectionStore detectionStore,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        TrimBackups backups)
     {
+        _backups = backups;
         _logger = logger;
         _libraryManager = libraryManager;
         _service = service;
@@ -52,7 +57,8 @@ public sealed class ProgramStartController : ControllerBase
         _serviceProvider = serviceProvider;
     }
 
-    public sealed record StatusResponse(double? StartSeconds, string? Source, string? Action, string? Message, DateTime? UpdatedUtc, int Cards, bool CanUndo = false);
+    // UndoUntil: when a kept original's undo time is up (null: kept for good, or nothing to undo).
+    public sealed record StatusResponse(double? StartSeconds, string? Source, string? Action, string? Message, DateTime? UpdatedUtc, int Cards, bool CanUndo = false, DateTime? UndoUntil = null);
 
     public sealed record CardResponse(Guid Id, string Label, string? Channel, string? SourcePath, double SourceSeconds, DateTime CreatedUtc);
 
@@ -60,10 +66,12 @@ public sealed class ProgramStartController : ControllerBase
     [HttpGet("{itemId}")]
     public ActionResult<StatusResponse> Status([FromRoute] Guid itemId)
     {
-        var canUndo = _libraryManager.GetItemById(itemId) is BaseItem item && ProgramStartService.BackupOf(item) is not null;
+        var backup = _libraryManager.GetItemById(itemId) is BaseItem item ? ProgramStartService.BackupOf(item) : null;
+        var canUndo = backup is not null;
+        var undoUntil = backup is null ? null : _backups.ExpiresUtc(backup);
         return _store.TryGet(itemId, out var r) && r.Source is not (ProgramStartRecord.SourceNone or ProgramStartRecord.SourceUndone)
-            ? Ok(new StatusResponse(r.StartSeconds, r.Source, r.Action, r.Message, r.UpdatedUtc, _store.Cards.Count, canUndo))
-            : Ok(new StatusResponse(null, null, null, null, null, _store.Cards.Count, canUndo));
+            ? Ok(new StatusResponse(r.StartSeconds, r.Source, r.Action, r.Message, r.UpdatedUtc, _store.Cards.Count, canUndo, undoUntil))
+            : Ok(new StatusResponse(null, null, null, null, null, _store.Cards.Count, canUndo, undoUntil));
     }
 
     /// <summary>"Undo trim": the kept original goes back in place of the trimmed recording.</summary>
