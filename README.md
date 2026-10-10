@@ -73,9 +73,16 @@ The build output DLL is `Jellyfin.Plugin.ComskipSegments.dll` under
    ```
 3. Restart Jellyfin.
 
-### Either way
+### Either way: Comskip itself
 
-Dashboard → Plugins → **Comskip Commercial Segments** → set the paths → click
+Dashboard → Plugins → **Comskip Commercial Segments** → **Install Comskip**. On a Linux
+server (x86-64 or arm64) this downloads a self-contained Comskip 0.83.001 built from the
+open-source [Comskip](https://github.com/erikkaashoek/Comskip) (GPL-2.0; all the former
+"donator" features, H.264/HEVC and multi-threading, included), checks its SHA-256, puts it
+with a default `comskip.ini` and a work folder in Jellyfin's data folder
+(`<data>/comskip`), and fills in the three paths. How it's built: `comskip/README.md`.
+
+Elsewhere (Windows, other processors), or to use your own Comskip, set the paths and click
 **Test paths**. This checks them *as the service account*, which catches the
 `/home` traversal and systemd-sandbox (`ProtectHome`) cases the browser can't see.
 
@@ -189,6 +196,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.2.0.0 | 2026-10-10 | **Install Comskip** button (self-contained Comskip 0.83.001 for Linux x86-64/arm64, built from the GPL-2.0 source) and a clear "Comskip isn't installed" message instead of a silent failure; program start from remembered channel cards (skip marker or trim, in the background with progress, Undo trim for 7 days); recording edits limited to chosen users with a confirmation step; Remove commercials keeps them removed; web item menu follows the item's state. Re-run Web/install-overlay.sh for the web features. |
 | 1.1.0.0 | 2026-09-28 | Skip commercials in recordings still in progress (web + TV forks), web commercial badges, "Watch from start" for programmes being recorded, use existing .edl files, AudioTrim writes MPEG-TS for .mpg, menu and live-scan fixes. Re-run Web/install-overlay.sh for the web features. |
 | 1.0.1.0 | 2026-09-12 | Version bump only, no code changes. |
 | 1.0.0.0 | 2026-09-12 | Initial public release. |

@@ -7,7 +7,7 @@ on:
         description: Comskip commit, tag or branch (https://github.com/erikkaashoek/Comskip)
         default: a140b6a
   push:
-    branches: [comskip-binaries]
+    branches: [main]
     paths: [comskip/**, .github/workflows/comskip.yml]
 
 permissions:
