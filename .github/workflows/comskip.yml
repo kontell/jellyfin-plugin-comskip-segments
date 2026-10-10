@@ -1,0 +1,87 @@
+name: Build Comskip
+
+on:
+  workflow_dispatch:
+    inputs:
+      comskip_ref:
+        description: Comskip commit, tag or branch (https://github.com/erikkaashoek/Comskip)
+        default: a140b6a
+  push:
+    branches: [comskip-binaries]
+    paths: [comskip/**, .github/workflows/comskip.yml]
+
+permissions:
+  contents: write
+
+env:
+  COMSKIP_REF: ${{ inputs.comskip_ref || 'a140b6a' }}
+  FFMPEG_VERSION: 6.1.2
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build --build-arg COMSKIP_REF="$COMSKIP_REF" --build-arg FFMPEG_VERSION="$FFMPEG_VERSION" --output type=local,dest=out comskip
+      - name: Check it runs on its own
+        run: |
+          file out/comskip | tee /dev/stderr | grep -q "statically linked"
+          (out/comskip 2>&1 || true) | head -2 | tee version.txt
+          grep -q "^Comskip 0\." version.txt
+      - name: Name it
+        run: |
+          mv out/comskip comskip-linux-${{ matrix.arch }}
+          sha256sum comskip-linux-${{ matrix.arch }} > comskip-linux-${{ matrix.arch }}.sha256
+          head -1 version.txt | sed -E 's/^Comskip ([0-9.]+).*/\1/' > comskip-version.txt
+          cp out/comskip.commit comskip-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comskip-linux-${{ matrix.arch }}
+          path: |
+            comskip-linux-${{ matrix.arch }}
+            comskip-linux-${{ matrix.arch }}.sha256
+            comskip-version.txt
+            comskip-commit.txt
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          version=$(cat comskip-version.txt); commit=$(cat comskip-commit.txt)
+          tag="comskip-${version}-${commit}"
+          cat > notes.md <<NOTES
+          Self-contained Linux builds of **Comskip ${version}** for the plugin's *Install Comskip* button.
+
+          | File | For |
+          |---|---|
+          | \`comskip-linux-x64\` | 64-bit PCs and servers (x86-64) |
+          | \`comskip-linux-arm64\` | 64-bit ARM (Raspberry Pi 4/5, ARM NAS) |
+
+          Each has a \`.sha256\`. Comskip's former donator features (H.264/HEVC, multi-threading) are included.
+
+          **Source (GPL-2.0):** Comskip https://github.com/erikkaashoek/Comskip/tree/${commit},
+          built with ffmpeg ${FFMPEG_VERSION} (LGPL, https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz, only the decoders
+          and formats Comskip reads) and argtable2 2.13 (LGPL, https://argtable.sourceforge.io/), statically linked.
+          Build recipe: \`comskip/Dockerfile\` in this repository.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Comskip ${version} (${commit}) for Linux" --notes-file notes.md \
+            comskip-linux-x64 comskip-linux-x64.sha256 comskip-linux-arm64 comskip-linux-arm64.sha256
