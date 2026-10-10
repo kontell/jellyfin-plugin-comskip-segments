@@ -35,14 +35,17 @@ public sealed class ComskipSegmentsController : ControllerBase
     private readonly DetectionManager _manager;
     private readonly DetectionStore _store;
     private readonly IServiceProvider _serviceProvider;
+    private readonly Comskip.ComskipInstaller _installer;
 
     public ComskipSegmentsController(
         ILogger<ComskipSegmentsController> logger,
         ILibraryManager libraryManager,
         DetectionManager manager,
         DetectionStore store,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        Comskip.ComskipInstaller installer)
     {
+        _installer = installer;
         _logger = logger;
         _libraryManager = libraryManager;
         _manager = manager;
@@ -71,6 +74,18 @@ public sealed class ComskipSegmentsController : ControllerBase
             CheckWritableDirectory(request.WorkDirectory?.Trim())));
     }
 
+    /// <summary>Whether Comskip is installed (and which), and whether Install Comskip can install it here.</summary>
+    [HttpGet("ComskipInfo")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult<Comskip.ComskipInstaller.ComskipInfo> ComskipInfo() =>
+        Ok(_installer.Info(Plugin.Instance!.Configuration));
+
+    /// <summary>The settings page's Install Comskip: downloads, checks and sets it up, then saves the paths.</summary>
+    [HttpPost("InstallComskip")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<ActionResult<Comskip.ComskipInstaller.InstallResult>> InstallComskip(CancellationToken cancellationToken) =>
+        Ok(await _installer.InstallAsync(Plugin.Instance!.Configuration, cancellationToken).ConfigureAwait(false));
+
     /// <summary>
     /// Force a (re)run of detection for one item, bypassing the show/channel allow- and
     /// block-lists and any existing completed result the same way every other forced
@@ -88,6 +103,11 @@ public sealed class ComskipSegmentsController : ControllerBase
         if (item is null)
         {
             return NotFound(new DetectResponse(false, $"No library item with ID {itemId}"));
+        }
+
+        if (!Comskip.ComskipInstaller.IsInstalled(Plugin.Instance!.Configuration))
+        {
+            return Ok(new DetectResponse(false, Comskip.ComskipInstaller.NotInstalledMessage));
         }
 
         if (item is Folder)

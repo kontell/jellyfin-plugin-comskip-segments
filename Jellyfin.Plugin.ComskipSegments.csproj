@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Comskip\comskip.ini" />
     <EmbeddedResource Include="Web\overlay.js" />
     <EmbeddedResource Include="Web\overlay.css" />
     <EmbeddedResource Include="Web\itemmenu.js" />

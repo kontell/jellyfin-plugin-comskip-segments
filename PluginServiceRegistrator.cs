@@ -22,6 +22,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RecordingChannelCache>();
         serviceCollection.AddHostedService<LiveRecordingChannelPoller>();
         serviceCollection.AddSingleton<ComskipRunner>();
+        serviceCollection.AddSingleton<ComskipInstaller>();
         serviceCollection.AddSingleton<LiveScanCoordinator>();
         serviceCollection.AddHostedService<LiveScanStarter>();
 

@@ -445,6 +445,8 @@ public sealed class DetectionManager : BackgroundService
         }
     }
 
+    private DateTime _lastNotInstalledWarning = DateTime.MinValue;
+
     private async Task ProcessOne(Guid itemId, CancellationToken ct)
     {
         var cfg = Config;
@@ -548,6 +550,18 @@ public sealed class DetectionManager : BackgroundService
         if (harvestedEdlPath is not null)
         {
             result = new ComskipRunResult(ComskipOutcome.Ran, harvestedEdlPath, string.Empty);
+        }
+        else if (!ComskipInstaller.IsInstalled(cfg))
+        {
+            // Nothing to run yet: leave the item unscanned (not Failed), so it's picked up once
+            // Comskip is installed, and say so in the log now and then rather than per item.
+            if (DateTime.UtcNow - _lastNotInstalledWarning > TimeSpan.FromMinutes(10))
+            {
+                _lastNotInstalledWarning = DateTime.UtcNow;
+                _logger.LogWarning("{Message}", ComskipInstaller.NotInstalledMessage);
+            }
+
+            return;
         }
         else
         {

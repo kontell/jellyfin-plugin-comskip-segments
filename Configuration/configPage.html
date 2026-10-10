@@ -16,6 +16,15 @@
                 <div class="verticalSection">
                     <h2>Comskip paths</h2>
 
+                    <div id="ComskipInstallBox" style="margin-bottom:1.5em;">
+                        <div id="ComskipStatus" class="fieldDescription" style="font-size:1.05em;margin-bottom:0.6em;">Checking for Comskip...</div>
+                        <button id="InstallComskipBtn" type="button" is="emby-button" class="raised button-submit block" style="display:none;">
+                            <span id="InstallComskipLabel">Install Comskip</span>
+                        </button>
+                        <div id="InstallComskipResult" class="fieldDescription" style="margin-top:0.5em;white-space:pre-line;"></div>
+                        <div class="fieldDescription">Downloads a self-contained Comskip for this server (built from the open-source <a is="emby-linkbutton" class="button-link" href="https://github.com/erikkaashoek/Comskip" target="_blank">Comskip</a>, all features included), checks it, and fills in the paths below. Or install your own and set the paths yourself.</div>
+                    </div>
+
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="ComskipPath">Comskip binary path</label>
                         <input id="ComskipPath" name="ComskipPath" type="text" is="emby-input" />
@@ -443,6 +452,56 @@
                         Dashboard.hideLoadingMsg();
                     });
                 });
+
+            // Install Comskip: what's installed now, and the button (shown where it can install).
+            function showComskipInfo(page) {
+                var status = page.querySelector("#ComskipStatus");
+                var btn = page.querySelector("#InstallComskipBtn");
+                ApiClient.ajax({ type: "GET", url: ApiClient.getUrl("ComskipSegments/ComskipInfo"), dataType: "json" }).then(function (r) {
+                    if (r.Installed) {
+                        status.textContent = "\u2713 " + (r.Version || "Comskip") + " is installed at " + r.ComskipPath + ".";
+                    } else {
+                        status.textContent = "Comskip isn't installed yet: commercials can't be found until it is.";
+                    }
+                    if (r.CanInstall) {
+                        btn.style.display = "";
+                        page.querySelector("#InstallComskipLabel").textContent = (r.Installed ? "Install Comskip " + r.InstallVersion + " instead" : "Install Comskip " + r.InstallVersion);
+                    } else {
+                        btn.style.display = "none";
+                        if (!r.Installed && r.CannotInstallReason) { status.textContent += " " + r.CannotInstallReason; }
+                    }
+                }).catch(function () {
+                    status.textContent = "Couldn't check for Comskip.";
+                });
+            }
+
+            document.querySelector("#ComskipSegmentsConfigPage").addEventListener("pageshow", function () {
+                showComskipInfo(this);
+            });
+
+            document.querySelector("#InstallComskipBtn").addEventListener("click", function () {
+                var page = document.querySelector("#ComskipSegmentsConfigPage");
+                var out = page.querySelector("#InstallComskipResult");
+                var btn = this;
+                btn.disabled = true;
+                out.textContent = "Downloading and checking Comskip...";
+                ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("ComskipSegments/InstallComskip"), dataType: "json" }).then(function (r) {
+                    out.textContent = r.Message;
+                    btn.disabled = false;
+                    if (r.Ok) {
+                        // The server saved the new paths: show them.
+                        ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
+                            page.querySelector("#ComskipPath").value = config.ComskipPath || "";
+                            page.querySelector("#ComskipIniPath").value = config.ComskipIniPath || "";
+                            page.querySelector("#WorkDirectory").value = config.WorkDirectory || "";
+                        });
+                    }
+                    showComskipInfo(page);
+                }).catch(function () {
+                    btn.disabled = false;
+                    out.textContent = "Installing Comskip failed (the server didn't answer).";
+                });
+            });
 
             document.querySelector("#ValidateBtn").addEventListener("click", function () {
                 var page = document.querySelector("#ComskipSegmentsConfigPage");
