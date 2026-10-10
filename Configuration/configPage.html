@@ -465,7 +465,14 @@
                     }
                     if (r.CanInstall) {
                         btn.style.display = "";
-                        page.querySelector("#InstallComskipLabel").textContent = (r.Installed ? "Install Comskip " + r.InstallVersion + " instead" : "Install Comskip " + r.InstallVersion);
+                        // Already this version: a quiet Reinstall. Another Comskip (your own, or an older
+                        // one): offer this version instead. None: the main button.
+                        var same = r.Installed && (r.Version || "").indexOf(r.InstallVersion) >= 0;
+                        page.querySelector("#InstallComskipLabel").textContent =
+                            same ? "Reinstall Comskip " + r.InstallVersion
+                            : r.Installed ? "Replace it with Comskip " + r.InstallVersion
+                            : "Install Comskip " + r.InstallVersion;
+                        btn.classList.toggle("button-submit", !r.Installed);
                     } else {
                         btn.style.display = "none";
                         if (!r.Installed && r.CannotInstallReason) { status.textContent += " " + r.CannotInstallReason; }
