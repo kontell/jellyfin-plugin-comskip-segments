@@ -81,7 +81,12 @@ jobs:
           Build recipe: \`comskip/Dockerfile\` in this repository.
           NOTES
           sed -i 's/^          //' notes.md
-          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          # Never replace a published build: the plugin pins its checksums. A new Comskip
+          # commit (or recipe change) gets a new tag; same tag means nothing new to publish.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it as it is."
+            exit 0
+          fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Comskip ${version} (${commit}) for Linux" --notes-file notes.md \
             comskip-linux-x64 comskip-linux-x64.sha256 comskip-linux-arm64 comskip-linux-arm64.sha256
