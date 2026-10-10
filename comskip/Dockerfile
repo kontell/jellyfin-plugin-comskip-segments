@@ -16,7 +16,10 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz && tar x
     --enable-swscale --enable-swresample --enable-pic \
  && make -j"$(nproc)" && make install
 RUN wget -q -O argtable2-13.tar.gz https://downloads.sourceforge.net/project/argtable/argtable/argtable-2.13/argtable2-13.tar.gz \
- && tar xzf argtable2-13.tar.gz && cd argtable2-13 && ./configure --prefix=/usr/local --disable-shared --enable-static && make -j"$(nproc)" && make install
+ && tar xzf argtable2-13.tar.gz && cd argtable2-13 \
+ # its 2010 config.guess predates arm64: use automake's
+ && cp /usr/share/automake-*/config.guess /usr/share/automake-*/config.sub . \
+ && ./configure --prefix=/usr/local --disable-shared --enable-static && make -j"$(nproc)" && make install
 RUN git clone https://github.com/erikkaashoek/Comskip && cd Comskip && git checkout ${COMSKIP_REF} \
  && ./autogen.sh && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure --enable-static --disable-gui \
  && make -j"$(nproc)" && strip comskip && cp comskip /comskip && git rev-parse --short HEAD > /comskip.commit

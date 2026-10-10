@@ -20,6 +20,7 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { runner: ubuntu-24.04, arch: x64 }
