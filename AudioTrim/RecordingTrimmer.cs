@@ -16,11 +16,11 @@ public sealed record TrimOutcome(bool Success, string? BackupPath, string Messag
 /// Runs the actual ffmpeg cut for a <see cref="TrimPlan"/> and swaps the result into
 /// place at the recording's original path, so the library item's path never changes.
 ///
-/// Always writes ffmpeg's output to <paramref name="workDir"/> first (a location this
-/// plugin already treats as guaranteed-writable — see
-/// <see cref="Configuration.PluginConfiguration.WorkDirectory"/>) and only touches the
-/// recordings folder itself once that output is verified to exist and be a sane size,
-/// so a crash or a full disk mid-run can never leave the original recording missing.
+/// Writes ffmpeg's output to a hidden file beside the recording first (so a cut needs room on
+/// the recording's own drive, never on the server's system drive, and ends with a rename), and
+/// only replaces the recording once that output is verified to exist and be a sane size, so a
+/// crash or a full disk mid-run can never leave the original recording missing. Where the
+/// recording's folder can't be written, falls back to <paramref name="workDir"/>.
 /// </summary>
 public sealed class RecordingTrimmer
 {
@@ -47,17 +47,27 @@ public sealed class RecordingTrimmer
             return new TrimOutcome(false, null, "no trim needed");
         }
 
-        Directory.CreateDirectory(workDir);
-
         var ext = Path.GetExtension(recordingPath);
-        var tempOutput = Path.Combine(workDir, $"audiotrim-{Guid.NewGuid():N}{ext}");
+        var keptBytes = (long)(SafeLength(recordingPath) * (plan.TotalDurationSeconds - plan.LeadTrimSeconds - plan.TrailTrimSeconds) / plan.TotalDurationSeconds);
+        var tempOutput = TempBeside(recordingPath, ext) ?? Path.Combine(workDir, $"audiotrim-{Guid.NewGuid():N}{ext}");
+        Directory.CreateDirectory(Path.GetDirectoryName(tempOutput)!);
+
+        // Refuse up front rather than fill the drive: a full system drive breaks Jellyfin itself.
+        var free = FreeBytes(tempOutput);
+        if (free >= 0 && free < keptBytes + MinFreeAfterCut)
+        {
+            _logger.LogWarning(
+                "Not trimming {Path}: the cut needs about {Need:N0} MB and {Folder} has {Free:N0} MB free",
+                recordingPath, (keptBytes + MinFreeAfterCut) / 1048576, Path.GetDirectoryName(tempOutput), free / 1048576);
+            return new TrimOutcome(false, null, $"not enough free space for the cut ({free / 1073741824.0:F1} GB free, needs {(keptBytes + MinFreeAfterCut) / 1073741824.0:F1} GB)");
+        }
 
         try
         {
             if (job is not null)
             {
                 job.TempPath = tempOutput;
-                job.Bytes = (long)(SafeLength(recordingPath) * (plan.TotalDurationSeconds - plan.LeadTrimSeconds - plan.TrailTrimSeconds) / plan.TotalDurationSeconds);
+                job.Bytes = keptBytes;
                 job.Phase = CutJob.PhaseCutting;
             }
 
@@ -192,7 +202,7 @@ public sealed class RecordingTrimmer
     /// the trimmed file into its exact place. The backup is kept for good with
     /// <paramref name="keepOriginal"/>, otherwise for the configured undo days (or deleted
     /// right away when that's 0). The trimmed file may be on a different filesystem than the
-    /// recordings folder (the work directory doesn't have to be the same volume), so falls back
+    /// recordings folder (when it was cut in the work directory), so falls back
     /// to copy+delete when a plain rename can't cross volumes.
     /// </summary>
     private TrimOutcome SwapIntoPlace(string recordingPath, string trimmedPath, bool keepOriginal)
@@ -261,6 +271,58 @@ public sealed class RecordingTrimmer
         }
 
         return new TrimOutcome(true, backupPath, $"trim applied; original kept {days} days for Undo at {backupPath}");
+    }
+
+    // Room left on the drive once a cut is written, so the cut itself never fills it.
+    private const long MinFreeAfterCut = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// The hidden file a cut of <paramref name="recordingPath"/> is written to, in the recording's
+    /// own folder (Jellyfin's library scan skips dot files); null when that folder can't be
+    /// written. A cut left behind by a crash or a restart is removed first.
+    /// </summary>
+    private string? TempBeside(string recordingPath, string ext)
+    {
+        var folder = Path.GetDirectoryName(recordingPath);
+        if (string.IsNullOrEmpty(folder))
+        {
+            return null;
+        }
+
+        var prefix = "." + Path.GetFileNameWithoutExtension(recordingPath) + ".cutting-";
+        try
+        {
+            foreach (var stale in Directory.EnumerateFiles(folder, prefix + "*"))
+            {
+                _logger.LogInformation("Removing an unfinished cut left behind: {Path}", stale);
+                TryDelete(stale);
+            }
+
+            var path = Path.Combine(folder, $"{prefix}{Guid.NewGuid():N}{ext}");
+            using (File.Create(path))
+            {
+            }
+
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogInformation("Can't write beside {Path} ({Message}); cutting in the work directory", recordingPath, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>Free bytes on the drive holding <paramref name="path"/>, or -1 when unknown.</summary>
+    private static long FreeBytes(string path)
+    {
+        try
+        {
+            return new DriveInfo(Path.GetDirectoryName(path)!).AvailableFreeSpace;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return -1;
+        }
     }
 
     private static void MoveAcrossVolumes(string source, string destination)
