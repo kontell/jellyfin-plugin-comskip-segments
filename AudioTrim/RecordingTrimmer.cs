@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Editing;
+using MediaBrowser.Controller.MediaEncoding;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ComskipSegments.AudioTrim;
@@ -26,11 +27,13 @@ public sealed class RecordingTrimmer
 {
     private readonly ILogger<RecordingTrimmer> _logger;
     private readonly TrimBackups _backups;
+    private readonly IMediaEncoder _encoder;
 
-    public RecordingTrimmer(ILogger<RecordingTrimmer> logger, TrimBackups backups)
+    public RecordingTrimmer(ILogger<RecordingTrimmer> logger, TrimBackups backups, IMediaEncoder encoder)
     {
         _logger = logger;
         _backups = backups;
+        _encoder = encoder;
     }
 
     public async Task<TrimOutcome> ApplyAsync(
@@ -47,6 +50,7 @@ public sealed class RecordingTrimmer
             return new TrimOutcome(false, null, "no trim needed");
         }
 
+        plan = await OnKeyframeAsync(recordingPath, plan, cancellationToken).ConfigureAwait(false);
         var ext = Path.GetExtension(recordingPath);
         var keptBytes = (long)(SafeLength(recordingPath) * (plan.TotalDurationSeconds - plan.LeadTrimSeconds - plan.TrailTrimSeconds) / plan.TotalDurationSeconds);
         var tempOutput = TempBeside(recordingPath, ext) ?? Path.Combine(workDir, $"audiotrim-{Guid.NewGuid():N}{ext}");
@@ -271,6 +275,39 @@ public sealed class RecordingTrimmer
         }
 
         return new TrimOutcome(true, backupPath, $"trim applied; original kept {days} days for Undo at {backupPath}");
+    }
+
+    /// <summary>
+    /// Moves the start of the cut to the keyframe at or before it (see <see cref="Keyframes"/>):
+    /// started between keyframes, the picture would only appear at the next one, seconds into
+    /// the sound.
+    /// </summary>
+    private async Task<TrimPlan> OnKeyframeAsync(string recordingPath, TrimPlan plan, CancellationToken ct)
+    {
+        if (plan.LeadTrimSeconds <= 0)
+        {
+            return plan;
+        }
+
+        double? key;
+        try
+        {
+            key = await Keyframes.AtOrBeforeAsync(_encoder.ProbePath, recordingPath, plan.LeadTrimSeconds, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Couldn't read the keyframes of {Path}; cutting at {Lead:F2}s as asked", recordingPath, plan.LeadTrimSeconds);
+            return plan;
+        }
+
+        if (key is null)
+        {
+            return plan;
+        }
+
+        var lead = Math.Max(0, key.Value - Keyframes.Margin);
+        _logger.LogInformation("Cut of {Path} starts on the keyframe at {Key:F2}s (asked {Lead:F2}s)", recordingPath, key.Value, plan.LeadTrimSeconds);
+        return plan with { LeadTrimSeconds = lead, CoreDurationSeconds = plan.TotalDurationSeconds - lead - plan.TrailTrimSeconds };
     }
 
     // Room left on the drive once a cut is written, so the cut itself never fills it.

@@ -66,8 +66,12 @@ public sealed class ProgramStartService
         new(false, false, null, "Already working on this recording; wait for that to finish.");
 
     /// <summary>"Starts here (this recording)": the start is exactly <paramref name="seconds"/>.</summary>
-    public Task<ProgramStartResult> SetAsync(BaseItem item, double seconds) =>
-        Manual(item, job => ApplyAsync(item, seconds, ProgramStartRecord.SourceManual, null, $"marked at {Clock(seconds)}", job, background: true));
+    /// <remarks>
+    /// <paramref name="keyframe"/>: <paramref name="seconds"/> is a keyframe picked in an editor
+    /// (see <see cref="AudioTrim.Keyframes"/>); a trim then starts exactly there, with no lead kept.
+    /// </remarks>
+    public Task<ProgramStartResult> SetAsync(BaseItem item, double seconds, bool keyframe = false) =>
+        Manual(item, job => ApplyAsync(item, seconds, ProgramStartRecord.SourceManual, null, $"marked at {Clock(seconds)}", job, background: true, exact: keyframe));
 
     /// <summary>
     /// "Remember card (all recordings)": keeps the frame at <paramref name="seconds"/> as a card, finds
@@ -260,7 +264,7 @@ public sealed class ProgramStartService
     /// Marks or trims (per the setting). A trim with <paramref name="background"/> takes the
     /// job over and returns at once ("Cutting from …"); the clients follow it from the cut list.
     /// </summary>
-    private async Task<ProgramStartResult> ApplyAsync(BaseItem item, double start, string source, Guid? cardId, string how, CutJob job, bool background, bool markerOnly = false)
+    private async Task<ProgramStartResult> ApplyAsync(BaseItem item, double start, string source, Guid? cardId, string how, CutJob job, bool background, bool markerOnly = false, bool exact = false)
     {
         var cfg = Config;
         if (start < 1)
@@ -276,8 +280,9 @@ public sealed class ProgramStartService
             return new ProgramStartResult(true, false, start, $"Program starts at {Clock(start)} ({how}); the part before it is marked to skip.");
         }
 
-        // A little lead kept, as for the audio-format trim: never clip the program itself.
-        var lead = Math.Max(0, start - cfg.AudioTrimPaddingSeconds);
+        // A little lead kept, as for the audio-format trim: never clip the program itself. Not
+        // for a keyframe someone picked: they saw the frame the recording will start on.
+        var lead = exact ? start : Math.Max(0, start - cfg.AudioTrimPaddingSeconds);
         if (!background)
         {
             return await TrimAsync(item, start, lead, source, cardId, how, job).ConfigureAwait(false);

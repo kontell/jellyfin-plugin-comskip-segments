@@ -316,6 +316,71 @@
     });
   }
 
+  // A cut can only start on a keyframe: the two either side of the paused moment, with their
+  // pictures, to pick the one the recording will start on.
+  function keyframeChooser(apiClient, itemId, info, panel) {
+    return pausedPositionSeconds(apiClient).then(function (seconds) {
+      if (seconds === null) {
+        throw new Error('no position');
+      }
+      return apiClient.getJSON(apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + '/Keyframes', { seconds: seconds.toFixed(2) }));
+    }).then(function (k) {
+      var keys = [k.Before, k.After].filter(function (t) { return typeof t === 'number'; });
+      if (!keys.length) {
+        notify('Couldn\'t find where a cut can start near here.');
+        return;
+      }
+      panel.innerHTML = '';
+      panel.setAttribute('data-choosing', '1');
+      var note = document.createElement('div');
+      note.className = 'comskip-keyframe-note';
+      note.textContent = 'A cut can only start on a keyframe' +
+        (keys.length === 2 ? ' (every ' + (keys[1] - keys[0]).toFixed(1) + ' s here)' : '') +
+        '. Pick the picture the recording will start on; everything before it is cut. ' + undoNote(info);
+      panel.appendChild(note);
+      keys.forEach(function (t) {
+        var choice = document.createElement('button');
+        choice.type = 'button';
+        choice.className = 'comskip-keyframe';
+        var img = document.createElement('img');
+        img.alt = '';
+        // Fetched with the sign-in token (an <img> can't send it), then shown from memory.
+        fetch(apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + '/Frame', { seconds: t.toFixed(3), width: 400 }), {
+          headers: { Authorization: 'MediaBrowser Token="' + apiClient.accessToken() + '"' }
+        }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (b) {
+          if (b) {
+            img.src = URL.createObjectURL(b);
+          }
+        }).catch(function () {});
+        var label = document.createElement('span');
+        label.textContent = 'Start at ' + clock(t) + '.' + Math.floor((t % 1) * 10) + (t <= k.Seconds + 0.02 ? ' (before)' : ' (after)');
+        choice.appendChild(img);
+        choice.appendChild(label);
+        choice.onclick = function () {
+          Array.prototype.forEach.call(panel.querySelectorAll('button'), function (b) { b.disabled = true; });
+          apiClient.ajax({
+            type: 'POST',
+            url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId, { seconds: t.toFixed(3), keyframe: true }),
+            dataType: 'json'
+          }).then(function (r) {
+            notify(((r && r.Message) || 'Done.') + (r && r.Trimmed ? ' Start the recording again to see it.' : ''));
+            changed(itemId);
+          }, function (err) {
+            return failure(err, 'Setting the program start failed.').then(notify);
+          }).then(closeEdit);
+        };
+        panel.appendChild(choice);
+      });
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = 'Cancel';
+      cancel.onclick = closeEdit;
+      panel.appendChild(cancel);
+    }).catch(function (err) {
+      return failure(err, 'Couldn\'t read where a cut can start.').then(notify);
+    });
+  }
+
   function simple(apiClient, itemId, type, path, fallback, after) {
     return apiClient.ajax({ type: type, url: apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId + path), dataType: 'json' })
       .then(function (r) {
@@ -386,12 +451,22 @@
     }
 
     return apiClient.getJSON(apiClient.getUrl('ComskipSegments/ProgramStart/' + itemId)).catch(function () { return null; }).then(function (status) {
-      panel.appendChild(armedButton(
-        'Starts here (this recording)',
-        info.ProgramStartTrims
-          ? 'Press again: cut everything before this point. ' + undoNote(info)
-          : 'Press again: skip to here from the start (Remove program start takes it off)',
-        function () { return programStart(apiClient, itemId, false); }));
+      if (info.ProgramStartTrims) {
+        var here = document.createElement('button');
+        here.type = 'button';
+        here.textContent = 'Starts here (this recording)…';
+        here.title = 'Shows the keyframes either side of this moment to choose where the cut starts';
+        here.onclick = function () {
+          here.disabled = true;
+          keyframeChooser(apiClient, itemId, info, panel).then(function () { here.disabled = false; });
+        };
+        panel.appendChild(here);
+      } else {
+        panel.appendChild(armedButton(
+          'Starts here (this recording)',
+          'Press again: skip to here from the start (Remove program start takes it off)',
+          function () { return programStart(apiClient, itemId, false); }));
+      }
       panel.appendChild(armedButton(
         'Remember card (all recordings)',
         'Press again: remember this card; recordings from this channel find their start by it (Forget it on the plugin page)',

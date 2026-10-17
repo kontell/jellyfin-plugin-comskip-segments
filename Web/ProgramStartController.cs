@@ -81,8 +81,80 @@ public sealed class ProgramStartController : ControllerBase
 
     /// <summary>"Program starts here": the program begins at <paramref name="seconds"/>.</summary>
     [HttpPost("{itemId}")]
-    public Task<ActionResult<ProgramStartResult>> Set([FromRoute] Guid itemId, [FromQuery] double seconds, CancellationToken ct) =>
-        Run(itemId, item => _service.SetAsync(item, seconds));
+    public Task<ActionResult<ProgramStartResult>> Set([FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] bool keyframe, CancellationToken ct) =>
+        Run(itemId, item => _service.SetAsync(item, seconds, keyframe));
+
+    public sealed record KeyframesResponse(double Seconds, double? Before, double? After);
+
+    /// <summary>
+    /// The keyframes either side of <paramref name="seconds"/>: a cut can only start on one, so the
+    /// editors offer these two (with <see cref="Frame"/> pictures) instead of the moment itself.
+    /// Before is at or before the moment, After the next one.
+    /// </summary>
+    [HttpGet("{itemId}/Keyframes")]
+    public async Task<ActionResult<KeyframesResponse>> KeyframesAround([FromRoute] Guid itemId, [FromQuery] double seconds, CancellationToken ct)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            return NotFound();
+        }
+
+        var probe = _serviceProvider.GetService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>()?.ProbePath;
+        if (string.IsNullOrEmpty(probe))
+        {
+            return StatusCode(500);
+        }
+
+        var keys = await AudioTrim.Keyframes.AroundAsync(probe, item.Path, seconds, 30, ct).ConfigureAwait(false);
+        var before = keys.Where(k => k <= seconds + 0.02).Cast<double?>().LastOrDefault();
+        var after = keys.Where(k => k > seconds + 0.02).Cast<double?>().FirstOrDefault();
+        return Ok(new KeyframesResponse(seconds, before, after));
+    }
+
+    /// <summary>The picture at <paramref name="seconds"/> (a JPEG, <paramref name="width"/> wide).</summary>
+    [HttpGet("{itemId}/Frame")]
+    public async Task<ActionResult> Frame([FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] int width = 480, CancellationToken ct = default)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            return NotFound();
+        }
+
+        var ffmpeg = _serviceProvider.GetService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>()?.EncoderPath;
+        if (string.IsNullOrEmpty(ffmpeg))
+        {
+            return StatusCode(500);
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var a in new[]
+        {
+            "-v", "error", "-nostdin", "-ss", seconds.ToString("F3", System.Globalization.CultureInfo.InvariantCulture), "-i", item.Path,
+            "-frames:v", "1", "-vf", $"scale={Math.Clamp(width, 120, 1280)}:-2", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "4", "pipe:1"
+        })
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process is null)
+        {
+            return StatusCode(500);
+        }
+
+        _ = process.StandardError.ReadToEndAsync(ct);
+        using var jpeg = new System.IO.MemoryStream();
+        await process.StandardOutput.BaseStream.CopyToAsync(jpeg, ct).ConfigureAwait(false);
+        await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        return jpeg.Length == 0 ? NotFound() : File(jpeg.ToArray(), "image/jpeg");
+    }
 
     /// <summary>"Remember this card": the frame at <paramref name="seconds"/> is the channel's card before programs.</summary>
     [HttpPost("{itemId}/Card")]

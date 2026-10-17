@@ -92,6 +92,34 @@
   box-shadow: 0 0 0 2px #fbbf24;
 }
 
+/* Choosing the keyframe a cut starts on: two pictures side by side. */
+.comskip-keyframe-note {
+  flex-basis: 100%;
+  max-width: 52em;
+  padding: 0.5em 0.8em;
+  border-radius: 0.5em;
+  background: rgba(20, 20, 20, 0.85);
+  color: #fff;
+}
+
+.comskip-start-panel button.comskip-keyframe {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.5em;
+  border-radius: 0.6em;
+}
+
+.comskip-keyframe img {
+  width: 20em;
+  max-width: 40vw;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+  border-radius: 0.3em;
+}
+
 .comskip-start-panel button:disabled {
   opacity: 0.5;
   cursor: default;
