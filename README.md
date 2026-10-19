@@ -196,6 +196,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.2.0.1 | 2026-10-19 | Fix: Jellyfin could crash while Comskip ran (its output and error output were written into one buffer from two threads at once). Same fix for live scans and audio trims. |
 | 1.2.0.0 | 2026-10-10 | **Install Comskip** button (self-contained Comskip 0.83.001 for Linux x86-64/arm64, built from the GPL-2.0 source) and a clear "Comskip isn't installed" message instead of a silent failure; program start from remembered channel cards (skip marker or trim, in the background with progress, Undo trim for 7 days); recording edits limited to chosen users with a confirmation step; Remove commercials keeps them removed; web item menu follows the item's state. Re-run Web/install-overlay.sh for the web features. |
 | 1.1.0.0 | 2026-09-28 | Skip commercials in recordings still in progress (web + TV forks), web commercial badges, "Watch from start" for programmes being recorded, use existing .edl files, AudioTrim writes MPEG-TS for .mpg, menu and live-scan fixes. Re-run Web/install-overlay.sh for the web features. |
 | 1.0.1.0 | 2026-09-12 | Version bump only, no code changes. |

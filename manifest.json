@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/mackandall/jellyfin-plugin-comskip-segments/main/icon.png",
     "versions": [
       {
+        "version": "1.2.0.1",
+        "changelog": "Fix: Jellyfin could crash while Comskip ran (its output and error output were written into one buffer from two threads at once). Same fix for live scans and audio trims.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/mackandall/jellyfin-plugin-comskip-segments/releases/download/v1.2.0.1/jellyfin-plugin-comskip-segments_1.2.0.1.zip",
+        "checksum": "4f3576783637a719ac97485f490e017d",
+        "timestamp": "2026-10-19T21:39:00.0000000Z"
+      },
+      {
         "version": "1.2.0.0",
         "changelog": "Install Comskip button (self-contained Comskip 0.83.001 for Linux x86-64/arm64, all features) and a clear \"Comskip isn't installed\" message; program start from remembered channel cards with Undo trim; recording edits limited to chosen users with confirmation; Remove commercials keeps them removed. Re-run Web/install-overlay.sh for the web features.",
         "targetAbi": "12.0.0.0",
