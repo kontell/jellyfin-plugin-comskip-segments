@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Jellyfin.Plugin.ComskipSegments.Editing;
 using MediaBrowser.Controller.MediaEncoding;
 using Microsoft.Extensions.Logging;
@@ -158,10 +158,10 @@ public sealed class RecordingTrimmer
         psi.ArgumentList.Add("mpegts");
         psi.ArgumentList.Add(outputPath);
 
-        var log = new StringBuilder();
+        var log = new OutputTail();
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => log.Add(e.Data);
+        process.ErrorDataReceived += (_, e) => log.Add(e.Data);
 
         try
         {

@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
+using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ComskipSegments.Detection;
@@ -92,14 +92,14 @@ public sealed class LiveScanCoordinator : IDisposable
             psi.ArgumentList.Add(mediaPath);
 
             var process = new Process { StartInfo = psi, EnableRaisingEvents = false };
-            var log = new StringBuilder();
+            var log = new OutputTail();
 
             // Must drain these even though we normally don't care about the content — an
             // unread, full redirected-output pipe would eventually block Comskip's own
             // writes for a job that can run for hours. Kept (bounded) so a self-exit can
             // be diagnosed instead of just logged as an unexplained surprise.
-            process.OutputDataReceived += (_, e) => AppendBounded(log, e.Data);
-            process.ErrorDataReceived += (_, e) => AppendBounded(log, e.Data);
+            process.OutputDataReceived += (_, e) => log.Add(e.Data);
+            process.ErrorDataReceived += (_, e) => log.Add(e.Data);
 
             process.Start();
             process.BeginOutputReadLine();
@@ -348,24 +348,6 @@ public sealed class LiveScanCoordinator : IDisposable
         return string.Join('\n', all[start..]);
     }
 
-    private static void AppendBounded(StringBuilder log, string? line)
-    {
-        if (line is null)
-        {
-            return;
-        }
-
-        // Bounded so an hours-long job's captured output can't grow unreasonably; only
-        // the tail is ever surfaced (in LogSelfExit), so trimming the front is fine.
-        const int MaxLength = 8192;
-        if (log.Length > MaxLength)
-        {
-            log.Remove(0, log.Length - MaxLength);
-        }
-
-        log.AppendLine(line);
-    }
-
     private static string Normalize(string path) => path.Trim();
 
     private void TryKill(Process p)
@@ -402,5 +384,5 @@ public sealed class LiveScanCoordinator : IDisposable
         _jobs.Clear();
     }
 
-    private sealed record LiveJob(Process Process, string EdlPath, DateTime StartedUtc, StringBuilder Log);
+    private sealed record LiveJob(Process Process, string EdlPath, DateTime StartedUtc, OutputTail Log);
 }

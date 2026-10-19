@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -64,10 +63,10 @@ public sealed class ComskipRunner
         psi.ArgumentList.Add($"--output={workDir}");
         psi.ArgumentList.Add(mediaPath);
 
-        var log = new StringBuilder();
+        var log = new OutputTail();
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => log.Add(e.Data);
+        process.ErrorDataReceived += (_, e) => log.Add(e.Data);
 
         try
         {
