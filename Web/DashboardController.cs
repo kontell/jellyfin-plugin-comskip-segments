@@ -216,6 +216,24 @@ public sealed class DashboardController : ControllerBase
         return Ok(new FramesResponse(frames.Select(f => new FrameDto(f.T, f.Key, Convert.ToBase64String(f.Jpeg))).ToList()));
     }
 
+    public sealed record OverviewResponse(bool Done, string? Error, IReadOnlyList<FrameDto> Frames);
+
+    /// <summary>
+    /// The recording's keyframe pictures from number <paramref name="from"/> on (see
+    /// <see cref="OverviewService"/>); the first ask starts making them, later asks get the new ones.
+    /// </summary>
+    [HttpGet("{itemId}/Overview")]
+    public ActionResult<OverviewResponse> Overview([FromRoute] Guid itemId, [FromQuery] int from = 0)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            return NotFound();
+        }
+
+        var snap = _serviceProvider.GetRequiredService<OverviewService>().Get(itemId, item.Path, from);
+        return Ok(new OverviewResponse(snap.Done, snap.Error, snap.Frames.Select(f => new FrameDto(f.T, true, Convert.ToBase64String(f.Jpeg))).ToList()));
+    }
+
     /// <summary>The nearest run of black frames after (<paramref name="forward"/>) or before <paramref name="seconds"/>, up to 10 minutes away.</summary>
     [HttpGet("{itemId}/Black")]
     public async Task<ActionResult<FrameStrip.BlackRun?>> Black([FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] bool forward = true, CancellationToken ct = default)

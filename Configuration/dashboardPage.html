@@ -55,6 +55,17 @@
         #ComskipDashboardPage .csd-strip button.cur { border-color: #fff; }
         #ComskipDashboardPage .csd-strip button.key::after { content: "K"; position: absolute; left: 2px; top: 1px; font-size: 10px; font-weight: 700; color: #fff; background: #00a4dc; padding: 0 3px; border-radius: 2px; }
         #ComskipDashboardPage .csd-strip button.brk { box-shadow: inset 0 -4px 0 #e53935; }
+        #ComskipDashboardPage .csd-strip button.empty { visibility: hidden; }
+        #ComskipDashboardPage .csd-tlbox { position: relative; }
+        #ComskipDashboardPage .csd-hover { position: absolute; bottom: 64px; width: 200px; margin-left: -100px; background: #000; border: 2px solid #fff; border-radius: 6px; overflow: hidden; pointer-events: none; z-index: 2; }
+        #ComskipDashboardPage .csd-hover img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; }
+        #ComskipDashboardPage .csd-hover span { position: absolute; left: 4px; bottom: 4px; padding: 1px 6px; border-radius: 3px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.8em; }
+        #ComskipDashboardPage .csd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; max-height: 520px; overflow-y: auto; margin-top: 10px; }
+        #ComskipDashboardPage .csd-grid button { position: relative; padding: 0; border: 2px solid transparent; border-radius: 4px; background: #000; cursor: pointer; aspect-ratio: 16 / 9; overflow: hidden; }
+        #ComskipDashboardPage .csd-grid button img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #ComskipDashboardPage .csd-grid button span { position: absolute; left: 3px; bottom: 3px; padding: 0 5px; border-radius: 3px; background: rgba(0,0,0,0.75); color: #fff; font-size: 11px; }
+        #ComskipDashboardPage .csd-grid button.brk { box-shadow: inset 0 -5px 0 #e53935; }
+        #ComskipDashboardPage .csd-grid button.cur { border-color: #fff; }
         #ComskipDashboardPage .csd-frame .csd-where { position: absolute; right: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(229,57,53,0.85); color: #fff; }
         #ComskipDashboardPage .csd-timeline { position: relative; height: 52px; background: rgba(255,255,255,0.12); border-radius: 6px; margin-top: 22px; cursor: pointer; touch-action: none; user-select: none; }
         #ComskipDashboardPage .csd-block { position: absolute; top: 6px; bottom: 6px; background: #e53935; border-radius: 4px; opacity: 0.85; }
@@ -138,11 +149,26 @@
                             <button type="button" class="csd-btn" data-nav="+10s" title="Forward 10 seconds">+10 s</button>
                         </div>
                         <div class="csd-row" style="margin-top: 8px;">
+                            <button type="button" class="csd-btn" id="CsdRew" aria-pressed="false" title="Rewind through the keyframes (J); again to stop">◀◀ Rewind</button>
+                            <button type="button" class="csd-btn" id="CsdFwd" aria-pressed="false" title="Fast forward through the keyframes (L); again to stop">Fast forward ▶▶</button>
+                            <label class="csd-sub" for="CsdSpeed">Speed</label>
+                            <select id="CsdSpeed" style="min-height: 40px; background: rgba(0,0,0,0.3); color: inherit; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 0 8px;">
+                                <option value="2">2 pictures a second</option>
+                                <option value="4" selected>4 pictures a second</option>
+                                <option value="8">8 pictures a second</option>
+                                <option value="16">16 pictures a second</option>
+                            </select>
+                            <span class="csd-sub" id="CsdPlayInfo"></span>
+                            <span class="csd-grow"></span>
+                            <button type="button" class="csd-btn" id="CsdGridBtn" aria-pressed="false">Overview</button>
+                            <span class="csd-sub" id="CsdOvStatus"></span>
+                        </div>
+                        <div class="csd-row" style="margin-top: 8px;">
                             <span id="CsdBlack" class="csd-sub csd-grow"></span>
                             <button type="button" class="csd-btn" id="CsdSetStart" title="[">Break starts here</button>
                             <button type="button" class="csd-btn" id="CsdSetEnd" title="]">Break ends here</button>
                         </div>
-                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end.</div>
+                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end, J K L rewind / stop / fast forward (again: faster).</div>
                         <div class="fieldDescription">To mark a new break, press <b>Break starts here</b> where it starts (it lights up), go to where it ends and press <b>Break ends here</b>; either order works, and pressing the lit button again cancels. Inside a break, the buttons move that break's start or end. A new break that overlaps others joins them.</div>
                     </div>
                     <div class="csd-side csd-panel" style="margin: 0;">
@@ -155,10 +181,18 @@
                     </div>
                 </div>
 
+                <div class="csd-panel csd-hidden" id="CsdGridBox">
+                    <div class="csd-row"><h3 style="margin: 0;">Overview</h3><span class="csd-sub">A picture at every keyframe; red underline: in a break. Click one to go there.</span></div>
+                    <div class="csd-grid" id="CsdGrid"></div>
+                </div>
+
                 <div class="csd-panel">
                     <div class="csd-ticks" id="CsdTicks"></div>
-                    <div class="csd-timeline" id="CsdTimeline" aria-label="Timeline: click to move the playhead, drag a break's edges"></div>
-                    <div class="fieldDescription" style="margin-top: 10px;">Click to move the playhead. Drag a break's edges to move its start or end. Blue along the top: other segments (intros, a program-start preview), not edited here.</div>
+                    <div class="csd-tlbox">
+                        <div class="csd-hover csd-hidden" id="CsdHover"><img alt="" /><span></span></div>
+                        <div class="csd-timeline" id="CsdTimeline" aria-label="Timeline: click or drag to move the playhead, drag a break's edges"></div>
+                    </div>
+                    <div class="fieldDescription" style="margin-top: 10px;">Point at the timeline to see the picture there; click, or drag along it to scrub. Drag a break's edges to move its start or end. Blue along the top: other segments (intros, a program-start preview), not edited here.</div>
                 </div>
 
                 <div class="csd-panel">
@@ -367,6 +401,8 @@
                 $("#CsdList").classList.toggle("csd-hidden", editor);
                 $("#CsdEditor").classList.toggle("csd-hidden", !editor);
                 if (!editor) {
+                    stopPlay(true);
+                    clearTimeout(ov.timer);
                     stopPolling();
                     ed = null;
                     loadList();
@@ -386,7 +422,9 @@
                 $("#CsdStrip").innerHTML = "";
                 $("#CsdBlack").textContent = "";
                 cache = { id: id, list: [], loading: null, pending: 0 };
-                return loadDetail(id, true);
+                stopPlay(true);
+                gridCur = -1;
+                return loadDetail(id, true).then(function () { startOverview(id); });
             }
 
             function loadDetail(id, fresh) {
@@ -402,6 +440,10 @@
                         dirty: false,
                         mark: null      // a new break's start or end, marked and waiting for the other: { edge, t }
                     };
+                    if (fresh) {
+                        // After a cut or undo the frames' times are different: load them again.
+                        cache = { id: id, list: [], loading: null, pending: 0 };
+                    }
                     if (fresh && ed.breaks.length) {
                         ed.sel = 0;
                         ed.head = ed.breaks[0].End;
@@ -484,6 +526,7 @@
             }
 
             function changed() {
+                setTimeout(markGrid, 0);
                 ed.breaks.sort(function (a, b) { return a.Start - b.Start; });
                 ed.dirty = true;
                 $("#CsdSaveResult").textContent = "";
@@ -673,8 +716,7 @@
                 var img = $("#CsdImg");
                 clearTimeout(frameTimer);
                 if (i >= 0 && covers(ed.head)) {
-                    img.src = l[i].src;
-                    img.alt = "The picture at " + clock(ed.head, true);
+                    setPicture(l[i].src, "The picture at " + clock(ed.head, true));
                     renderStrip(i);
                     // Load on ahead (or back) before the steps get there.
                     if (!cache.loading && i > l.length - 40 && l[l.length - 1].T < ed.seconds - 0.05) {
@@ -684,7 +726,7 @@
                     }
                     return;
                 }
-                $("#CsdStrip").innerHTML = "";
+                Array.prototype.forEach.call($("#CsdStrip").children, function (b) { b.className = "empty"; });
                 var id = ed.id, at = ed.head;
                 frameTimer = setTimeout(function () {
                     fetch(ApiClient.getUrl("ComskipSegments/ProgramStart/" + id + "/Frame", { seconds: at.toFixed(3), width: 960 }), {
@@ -701,20 +743,226 @@
                 }, 150);
             }
 
+            // The big picture changes only once the new one is decoded, so stepping never shows black in between.
+            var pictureSeq = 0;
+            function setPicture(src, alt) {
+                var img = $("#CsdImg"), seq = ++pictureSeq;
+                if (img.getAttribute("src") === src) {
+                    return;
+                }
+                var next = new Image();
+                next.src = src;
+                (next.decode ? next.decode() : Promise.resolve()).catch(function () {}).then(function () {
+                    if (seq === pictureSeq) {
+                        img.src = src;
+                        img.alt = alt;
+                    }
+                });
+            }
+
+            // The strip keeps its 11 pictures and only changes what they show (rebuilding them flashed black).
             function renderStrip(i) {
-                var l = cache.list, html = "";
-                for (var j = i - 5; j <= i + 5; j++) {
-                    var f = l[j];
+                var strip = $("#CsdStrip"), l = cache.list;
+                if (strip.children.length !== 11) {
+                    var html = "";
+                    for (var n = 0; n < 11; n++) {
+                        html += '<button type="button" class="empty"><img alt="" /></button>';
+                    }
+                    strip.innerHTML = html;
+                }
+                for (var j = i - 5, n2 = 0; j <= i + 5; j++, n2++) {
+                    var btn = strip.children[n2], f = l[j];
                     if (!f) {
-                        html += "<span></span>";
+                        btn.className = "empty";
+                        btn.removeAttribute("data-goto");
                         continue;
                     }
                     var inBreak = ed.breaks.some(function (b) { return f.T >= b.Start && f.T < b.End; });
-                    html += '<button type="button" data-goto="' + f.T + '" class="' + (j === i ? "cur " : "") + (f.Key ? "key " : "") + (inBreak ? "brk" : "")
-                        + '" title="' + clock(f.T, true) + (f.Key ? " (keyframe)" : "") + '"><img alt="" src="' + f.src + '"></button>';
+                    btn.className = (j === i ? "cur " : "") + (f.Key ? "key " : "") + (inBreak ? "brk" : "");
+                    btn.setAttribute("data-goto", f.T);
+                    btn.title = clock(f.T, true) + (f.Key ? " (keyframe)" : "");
+                    var im = btn.firstChild;
+                    if (im.getAttribute("src") !== f.src) {
+                        im.src = f.src;
+                    }
                 }
-                $("#CsdStrip").innerHTML = html;
             }
+
+            // ---- Overview: a picture at every keyframe of the whole recording ----
+            var ov = { id: null, list: [], done: false, timer: null };
+
+            function startOverview(id) {
+                clearTimeout(ov.timer);
+                ov = { id: id, list: [], done: false, timer: null };
+                $("#CsdGrid").innerHTML = "";
+                $("#CsdOvStatus").textContent = "Making the overview…";
+                pollOverview();
+            }
+
+            function pollOverview() {
+                var id = ov.id;
+                if (!ed || ed.id !== id) {
+                    return;
+                }
+                api("GET", "ComskipSegments/Dashboard/" + id + "/Overview?from=" + ov.list.length).then(function (r) {
+                    if (ov.id !== id) {
+                        return;
+                    }
+                    var added = (r.Frames || []).map(function (f) { return { T: f.T, src: "data:image/jpeg;base64," + f.Jpeg }; });
+                    ov.list = ov.list.concat(added);
+                    ov.done = r.Done;
+                    $("#CsdOvStatus").textContent = r.Error ? "Couldn't make the overview: " + r.Error
+                        : r.Done ? "" : "Making the overview… " + (ov.list.length ? clock(ov.list[ov.list.length - 1].T) + " of " + clock(ed.seconds) : "");
+                    appendGrid(added);
+                    if (!r.Done) {
+                        ov.timer = setTimeout(pollOverview, 800);
+                    }
+                }, function () {
+                    ov.timer = setTimeout(pollOverview, 3000);
+                });
+            }
+
+            // The overview picture showing at t: the last keyframe at or before it.
+            function ovAt(t) {
+                var l = ov.list, lo = 0, hi = l.length - 1, found = -1;
+                while (lo <= hi) {
+                    var mid = (lo + hi) >> 1;
+                    if (l[mid].T <= t + 0.0005) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+                }
+                return found;
+            }
+
+            function appendGrid(added) {
+                var grid = $("#CsdGrid"), html = "";
+                added.forEach(function (f) {
+                    html += '<button type="button" data-goto="' + f.T + '" title="' + clock(f.T, true) + '"><img alt="" loading="lazy" src="' + f.src + '"><span>' + clock(f.T) + "</span></button>";
+                });
+                grid.insertAdjacentHTML("beforeend", html);
+                markGrid();
+            }
+
+            // Breaks and the current position on the overview.
+            var gridCur = -1;
+            function markGrid() {
+                if ($("#CsdGridBox").classList.contains("csd-hidden")) {
+                    return;
+                }
+                var buttons = $("#CsdGrid").children;
+                for (var i = 0; i < buttons.length && i < ov.list.length; i++) {
+                    var t = ov.list[i].T;
+                    buttons[i].classList.toggle("brk", ed.breaks.some(function (b) { return t >= b.Start && t < b.End; }));
+                }
+                markGridCurrent();
+            }
+
+            function markGridCurrent() {
+                if ($("#CsdGridBox").classList.contains("csd-hidden")) {
+                    return;
+                }
+                var buttons = $("#CsdGrid").children, i = ovAt(ed.head);
+                if (gridCur >= 0 && buttons[gridCur]) {
+                    buttons[gridCur].classList.remove("cur");
+                }
+                gridCur = i;
+                if (i >= 0 && buttons[i]) {
+                    buttons[i].classList.add("cur");
+                }
+            }
+
+            $("#CsdGridBtn").addEventListener("click", function () {
+                var box = $("#CsdGridBox"), open = box.classList.contains("csd-hidden");
+                box.classList.toggle("csd-hidden", !open);
+                this.classList.toggle("lit", open);
+                this.setAttribute("aria-pressed", String(open));
+                if (open) {
+                    markGrid();
+                    var cur = $("#CsdGrid").children[gridCur];
+                    if (cur) {
+                        cur.scrollIntoView({ block: "nearest" });
+                    }
+                }
+            });
+
+            // Pointing at the timeline shows the picture there.
+            function hoverAt(clientX) {
+                var line = $("#CsdTimeline").getBoundingClientRect(), box = $("#CsdHover");
+                var f = Math.max(0, Math.min(1, (clientX - line.left) / line.width)), t = f * ed.seconds, i = ovAt(t);
+                if (i < 0) {
+                    box.classList.add("csd-hidden");
+                    return t;
+                }
+                box.classList.remove("csd-hidden");
+                box.style.left = Math.max(100, Math.min(line.width - 100, f * line.width)) + "px";
+                var im = box.firstChild;
+                if (im.getAttribute("src") !== ov.list[i].src) {
+                    im.src = ov.list[i].src;
+                }
+                box.lastChild.textContent = clock(t);
+                return t;
+            }
+
+            // ---- Fast forward and rewind: flips through the overview's pictures ----
+            var play = null;
+            function startPlay(dir) {
+                if (play && play.dir === dir) {
+                    stopPlay();
+                    return;
+                }
+                stopPlay(true);
+                if (ov.list.length === 0) {
+                    $("#CsdPlayInfo").textContent = "The overview isn't ready yet.";
+                    return;
+                }
+                play = { dir: dir, i: Math.max(0, ovAt(ed.head)) };
+                var btn = dir > 0 ? $("#CsdFwd") : $("#CsdRew");
+                btn.classList.add("lit");
+                btn.setAttribute("aria-pressed", "true");
+                tickPlay();
+            }
+
+            function tickPlay() {
+                if (!play || !ed) {
+                    return;
+                }
+                var speed = Number($("#CsdSpeed").value), next = play.i + play.dir;
+                if (next < 0 || next >= ov.list.length) {
+                    stopPlay();
+                    return;
+                }
+                play.i = next;
+                var f = ov.list[next];
+                ed.head = f.T;
+                setPicture(f.src, "The picture at " + clock(f.T));
+                $("#CsdTime").textContent = clock(f.T, true);
+                var gap = ov.list.length > 1 ? (ov.list[ov.list.length - 1].T - ov.list[0].T) / (ov.list.length - 1) : 4;
+                $("#CsdPlayInfo").textContent = "about " + Math.round(speed * gap) + "× normal speed";
+                var inside = ed.breaks.filter(function (b) { return f.T >= b.Start && f.T < b.End; })[0];
+                $("#CsdWhere").classList.toggle("csd-hidden", !inside);
+                $("#CsdWhere").textContent = inside ? "In break " + (ed.breaks.indexOf(inside) + 1) : "";
+                renderTimeline();
+                markGridCurrent();
+                play.timer = setTimeout(tickPlay, 1000 / speed);
+            }
+
+            // Stops, and loads the frames where it stopped (unless something else moves the playhead next).
+            function stopPlay(quiet) {
+                if (!play) {
+                    return;
+                }
+                clearTimeout(play.timer);
+                play = null;
+                ["#CsdFwd", "#CsdRew"].forEach(function (sel) {
+                    $(sel).classList.remove("lit");
+                    $(sel).setAttribute("aria-pressed", "false");
+                });
+                $("#CsdPlayInfo").textContent = "";
+                if (!quiet && ed) {
+                    goTo(ed.head);
+                }
+            }
+
+            $("#CsdFwd").addEventListener("click", function () { startPlay(1); });
+            $("#CsdRew").addEventListener("click", function () { startPlay(-1); });
 
             // The old name, used by the rest of the page.
             function frame() {
@@ -726,6 +974,7 @@
             }
 
             function nav(what) {
+                stopPlay(true);
                 switch (what) {
                     case "+1": stepFrames(1); break;
                     case "-1": stepFrames(-1); break;
@@ -748,6 +997,7 @@
                 if (b) {
                     nav(b.getAttribute("data-nav"));
                 } else if (g) {
+                    stopPlay(true);
                     goTo(Number(g.getAttribute("data-goto")));
                 }
             });
@@ -823,6 +1073,17 @@
                 } else if (e.key === "]") {
                     setEdge("End");
                     flash($("#CsdSetEnd"));
+                } else if (e.key === "l" || e.key === "j") {
+                    var dir = e.key === "l" ? 1 : -1, sp = $("#CsdSpeed");
+                    if (play && play.dir === dir) {
+                        // Again in the same direction: faster.
+                        sp.selectedIndex = Math.min(sp.options.length - 1, sp.selectedIndex + 1);
+                    } else {
+                        startPlay(dir);
+                    }
+                    flash(dir > 0 ? $("#CsdFwd") : $("#CsdRew"));
+                } else if (e.key === "k" || (e.key === " " && play)) {
+                    stopPlay();
                 } else if (e.key === "Escape" && ed.mark) {
                     ed.mark = null;
                     $("#CsdSaveResult").textContent = "Mark cancelled.";
@@ -981,10 +1242,37 @@
                 if (block) {
                     select(Number(block.getAttribute("data-i")));
                 }
-                moveHead(at(e.clientX));
+                // Scrubbing: while the button is held, the overview's pictures follow the pointer;
+                // letting go loads the frames there.
+                stopPlay(true);
+                drag = { scrub: true, at: at };
+                this.setPointerCapture(e.pointerId);
+                scrubTo(at(e.clientX));
+            });
+
+            function scrubTo(t) {
+                ed.head = Math.max(0, Math.min(ed.seconds, t));
+                var i = ovAt(ed.head);
+                if (i >= 0) {
+                    setPicture(ov.list[i].src, "The picture at " + clock(ov.list[i].T));
+                }
+                $("#CsdTime").textContent = clock(ed.head, true);
+                renderTimeline();
+            }
+
+            $("#CsdTimeline").addEventListener("pointerleave", function () {
+                $("#CsdHover").classList.add("csd-hidden");
             });
             $("#CsdTimeline").addEventListener("pointermove", function (e) {
+                if (!ed) {
+                    return;
+                }
+                var t = hoverAt(e.clientX);
                 if (!drag) {
+                    return;
+                }
+                if (drag.scrub) {
+                    scrubTo(t);
                     return;
                 }
                 var t = drag.at(e.clientX);
@@ -999,6 +1287,12 @@
             });
             $("#CsdTimeline").addEventListener("pointerup", function () {
                 if (!drag) {
+                    return;
+                }
+                if (drag.scrub) {
+                    drag = null;
+                    $("#CsdHover").classList.add("csd-hidden");
+                    goTo(ed.head);
                     return;
                 }
                 var b = drag.b;
@@ -1121,7 +1415,8 @@
                     e.target.disabled = true;
                     api("POST", "ComskipSegments/Dashboard/" + ed.id + "/UndoCut").then(function (r) {
                         if (r.Ok) {
-                            loadDetail(ed.id, true);
+                            var undone = ed.id;
+                            loadDetail(undone, true).then(function () { startOverview(undone); });
                         } else {
                             $("#CsdUndoResult").textContent = r.Message;
                             e.target.disabled = false;
@@ -1149,7 +1444,8 @@
                             poll = setTimeout(tick, 2000);
                         } else if (ed.cutting) {
                             ed.cutting = null;
-                            loadDetail(id, true);
+                            // The file changed: its overview is made again.
+                            loadDetail(id, true).then(function () { startOverview(id); });
                         }
                     });
                 };

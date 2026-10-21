@@ -38,6 +38,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ProgramStart.ProgramStartService>();
         serviceCollection.AddSingleton<Editing.CommercialCutStore>();
         serviceCollection.AddSingleton<Editing.CommercialCutService>();
+        serviceCollection.AddSingleton<Editing.OverviewService>();
+        serviceCollection.AddHostedService<Editing.OverviewCleaner>();
 
         // DetectionManager is both a singleton (so the provider/watcher/task can enqueue
         // into it) AND the hosted service that runs the worker loop. Register the singleton
