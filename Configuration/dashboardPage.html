@@ -403,6 +403,8 @@
                 var cut = r.Status === "cut";
                 $("#CsdSaveBox").classList.toggle("csd-hidden", cut);
                 $("#CsdAdd").disabled = cut;
+                $("#CsdSetStart").classList.toggle("csd-hidden", cut);
+                $("#CsdSetEnd").classList.toggle("csd-hidden", cut);
                 $("#CsdSave").disabled = !ed.dirty;
                 $("#CsdDiscard").disabled = !ed.dirty;
                 $("#CsdCutBtn").disabled = ed.dirty || ed.breaks.length === 0 || !!d.CutRefusal;
