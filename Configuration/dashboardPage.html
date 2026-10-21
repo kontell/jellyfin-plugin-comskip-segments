@@ -34,6 +34,12 @@
         #ComskipDashboardPage .csd-btn.primary { background: #00a4dc; border-color: #00a4dc; color: #001018; font-weight: 600; }
         #ComskipDashboardPage .csd-btn.danger { border-color: #e53935; color: #ffcdd2; }
         #ComskipDashboardPage .csd-btn.danger.solid { background: #e53935; color: #fff; font-weight: 600; }
+        #ComskipDashboardPage .csd-btn:not(:disabled):active { background: rgba(0,164,220,0.35); }
+        #ComskipDashboardPage .csd-btn.flash { background: rgba(0,164,220,0.45); border-color: #00a4dc; transition: none; }
+        #ComskipDashboardPage .csd-btn { transition: background 0.35s, border-color 0.35s; }
+        #ComskipDashboardPage .csd-btn.lit { background: #f5a524; border-color: #f5a524; color: #1a1206; font-weight: 600; }
+        #ComskipDashboardPage .csd-mark { position: absolute; top: -8px; bottom: -8px; width: 3px; margin-left: -1px; background: #f5a524; pointer-events: none; }
+        #ComskipDashboardPage .csd-pending { position: absolute; top: 6px; bottom: 6px; background: repeating-linear-gradient(135deg, rgba(245,165,36,0.55) 0 6px, rgba(245,165,36,0.25) 6px 12px); border-radius: 4px; pointer-events: none; }
         #ComskipDashboardPage .csd-split { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
         #ComskipDashboardPage .csd-preview { flex: 999 1 480px; min-width: 0; }
         #ComskipDashboardPage .csd-side { flex: 1 1 260px; min-width: 0; }
@@ -136,7 +142,8 @@
                             <button type="button" class="csd-btn" id="CsdSetStart" title="[">Break starts here</button>
                             <button type="button" class="csd-btn" id="CsdSetEnd" title="]">Break ends here</button>
                         </div>
-                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] set the selected break's start or end.</div>
+                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end.</div>
+                        <div class="fieldDescription">To mark a new break, press <b>Break starts here</b> where it starts (it lights up), go to where it ends and press <b>Break ends here</b>; either order works, and pressing the lit button again cancels. Inside a break, the buttons move that break's start or end. A new break that overlaps others joins them.</div>
                     </div>
                     <div class="csd-side csd-panel" style="margin: 0;">
                         <div id="CsdInfo"></div>
@@ -392,7 +399,8 @@
                         breaks: d.Row.Breaks.map(function (b) { return { Start: b.Start, End: b.End }; }),
                         sel: -1,
                         head: keepHead,
-                        dirty: false
+                        dirty: false,
+                        mark: null      // a new break's start or end, marked and waiting for the other: { edge, t }
                     };
                     if (fresh && ed.breaks.length) {
                         ed.sel = 0;
@@ -400,6 +408,7 @@
                     }
                     $("#CsdWriteEdl").checked = d.Edl === "ours" || (d.Edl === "none" && d.Settings.WriteEdl);
                     renderEditor();
+                    renderMarks();
                     frame();
                     watchCut();
                 }, function () {
@@ -454,7 +463,9 @@
                 }).join("") + ed.breaks.map(function (b, i) {
                     return '<div class="csd-block' + (i === ed.sel ? " sel" : "") + '" data-i="' + i + '" style="left:' + (b.Start / len * 100) + "%;width:" + ((b.End - b.Start) / len * 100) + '%">'
                         + (ed.d.Row.Status === "cut" ? "" : '<i class="l" data-edge="Start"></i><i class="r" data-edge="End"></i>') + "</div>";
-                }).join("") + '<div class="csd-head" style="left:' + (ed.head / len * 100) + '%"></div>';
+                }).join("") + (ed.mark ? '<div class="csd-pending" style="left:' + (Math.min(ed.mark.t, ed.head) / len * 100) + "%;width:" + (Math.abs(ed.head - ed.mark.t) / len * 100) + '%"></div>'
+                    + '<div class="csd-mark" style="left:' + (ed.mark.t / len * 100) + '%"></div>' : "")
+                    + '<div class="csd-head" style="left:' + (ed.head / len * 100) + '%"></div>';
             }
 
             function renderBreaks() {
@@ -741,6 +752,18 @@
                 }
             });
 
+            // Every button in the editor flashes when pressed, so a press can be seen (also from a key).
+            function flash(btn) {
+                if (!btn) {
+                    return;
+                }
+                btn.classList.add("flash");
+                setTimeout(function () { btn.classList.remove("flash"); }, 250);
+            }
+            page.addEventListener("click", function (e) {
+                flash(e.target.closest(".csd-btn"));
+            });
+
             // Scroll wheel over the picture, the strip or the timeline: a notch is a frame (Shift: a
             // second, Ctrl: a keyframe). A trackpad's small steps add up instead of racing ahead.
             var wheelSum = 0;
@@ -793,10 +816,17 @@
                 }[e.key];
                 if (what) {
                     nav(what);
+                    flash(page.querySelector('[data-nav="' + what + '"]'));
                 } else if (e.key === "[") {
                     setEdge("Start");
+                    flash($("#CsdSetStart"));
                 } else if (e.key === "]") {
                     setEdge("End");
+                    flash($("#CsdSetEnd"));
+                } else if (e.key === "Escape" && ed.mark) {
+                    ed.mark = null;
+                    $("#CsdSaveResult").textContent = "Mark cancelled.";
+                    renderMarks();
                 } else {
                     return;
                 }
@@ -805,25 +835,81 @@
 
             $("#CsdSetStart").addEventListener("click", function () { setEdge("Start"); });
             $("#CsdSetEnd").addEventListener("click", function () { setEdge("End"); });
+            // "Break starts here" / "Break ends here" ([ and ]). Inside a break: moves that break's start or
+            // end. Elsewhere: marks a new break's start (or end), lit until the other end is marked, which
+            // makes the break; pressing the lit one again cancels.
             function setEdge(edge) {
                 if (ed.d.Row.Status === "cut") {
                     return;
                 }
-                var b = ed.breaks[ed.sel];
-                if (!b) {
-                    $("#CsdSaveResult").textContent = "Pick a break first (click it on the timeline or in the list).";
+                var msg = $("#CsdSaveResult"), t = ed.head;
+                if (ed.mark && ed.mark.edge === edge) {
+                    ed.mark = null;
+                    msg.textContent = "Mark cancelled.";
+                    renderMarks();
                     return;
                 }
-                if ((edge === "Start" && ed.head >= b.End) || (edge === "End" && ed.head <= b.Start)) {
-                    $("#CsdSaveResult").textContent = edge === "Start" ? "A break has to start before it ends." : "A break has to end after it starts.";
+                if (ed.mark) {
+                    var from = Math.min(ed.mark.t, t), to = Math.max(ed.mark.t, t);
+                    if (to - from < 0.05) {
+                        msg.textContent = "The break's start and end are the same frame: move to the other end of the break first.";
+                        return;
+                    }
+                    ed.mark = null;
+                    addBreak(from, to);
                     return;
                 }
-                b[edge] = ed.head;
-                var keep = b;
+                var inside = ed.breaks.filter(function (b) { return edge === "Start" ? t >= b.Start && t < b.End : t > b.Start && t <= b.End; })[0];
+                if (inside) {
+                    if ((edge === "Start" && t >= inside.End) || (edge === "End" && t <= inside.Start)) {
+                        return;
+                    }
+                    inside[edge] = t;
+                    changed();
+                    ed.sel = ed.breaks.indexOf(inside);
+                    msg.textContent = "Break " + (ed.sel + 1) + (edge === "Start" ? " starts" : " ends") + " at " + clock(t, true) + ".";
+                    renderTimeline();
+                    renderBreaks();
+                    return;
+                }
+                ed.mark = { edge: edge, t: t };
+                msg.textContent = "New break " + (edge === "Start" ? "starts" : "ends") + " at " + clock(t, true) + ": now go to where it " + (edge === "Start" ? "ends and press Break ends here." : "starts and press Break starts here.");
+                renderMarks();
+            }
+
+            // A new break from..to; breaks it overlaps or touches join it.
+            function addBreak(from, to) {
+                var merged = { Start: from, End: to }, joined = 0;
+                ed.breaks = ed.breaks.filter(function (b) {
+                    if (b.End >= merged.Start && b.Start <= merged.End) {
+                        merged.Start = Math.min(merged.Start, b.Start);
+                        merged.End = Math.max(merged.End, b.End);
+                        joined++;
+                        return false;
+                    }
+                    return true;
+                });
+                ed.breaks.push(merged);
                 changed();
-                ed.sel = ed.breaks.indexOf(keep);
+                ed.sel = ed.breaks.indexOf(merged);
+                $("#CsdSaveResult").textContent = (joined ? "Joined with " + joined + " break" + (joined > 1 ? "s" : "") + ": " : "New ")
+                    + "break " + (ed.sel + 1) + ", " + clock(merged.Start, true) + " – " + clock(merged.End, true) + ". Save when you're done.";
+                renderMarks();
                 renderTimeline();
                 renderBreaks();
+            }
+
+            // The Break starts / ends buttons light up while one end of a new break is marked.
+            function renderMarks() {
+                [["Start", "#CsdSetStart", "Break starts here"], ["End", "#CsdSetEnd", "Break ends here"]].forEach(function (x) {
+                    var lit = !!ed.mark && ed.mark.edge === x[0];
+                    var btn = $(x[1]);
+                    btn.classList.toggle("lit", lit);
+                    btn.setAttribute("aria-pressed", String(lit));
+                    btn.textContent = lit ? (x[0] === "Start" ? "Starts at " : "Ends at ") + clock(ed.mark.t, true) + " ✕" : x[2];
+                    btn.title = lit ? "Press again to cancel" : (x[0] === "Start" ? "[" : "]");
+                });
+                renderTimeline();
             }
 
             $("#CsdAdd").addEventListener("click", function () {
