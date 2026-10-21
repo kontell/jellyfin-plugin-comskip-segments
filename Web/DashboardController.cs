@@ -82,7 +82,12 @@ public sealed class DashboardController : ControllerBase
         IReadOnlyList<Span> Breaks,
         string Status,
         string Source,
-        bool Busy);
+        bool Busy,
+        CutRow? Cut = null);
+
+    /// <param name="OriginalBytes">The kept original's size (null: none kept any more).</param>
+    /// <param name="UndoUntil">When the kept original goes (null: kept for good, or none kept).</param>
+    public sealed record CutRow(double SecondsBefore, long? OriginalBytes, DateTime? UndoUntil);
 
     public sealed record ListResponse(IReadOnlyList<Row> Items);
 
@@ -194,6 +199,11 @@ public sealed class DashboardController : ControllerBase
     [HttpPost("{itemId}/UndoCut")]
     public async Task<ActionResult<EditResult>> UndoCut([FromRoute] Guid itemId) =>
         _libraryManager.GetItemById(itemId) is BaseItem item ? Ok(await _cutter.UndoAsync(item).ConfigureAwait(false)) : NotFound();
+
+    /// <summary>Deletes a cut recording's kept original, to free its space; the cut can't be undone after.</summary>
+    [HttpPost("{itemId}/DeleteOriginal")]
+    public ActionResult<EditResult> DeleteOriginal([FromRoute] Guid itemId) =>
+        _libraryManager.GetItemById(itemId) is BaseItem item ? Ok(_cutter.DeleteOriginal(item)) : NotFound();
 
     /// <summary>A frame for the editor's frame-by-frame stepping: its time, keyframe or not, a JPEG (base64).</summary>
     public sealed record FrameDto(double T, bool Key, string Jpeg);
@@ -362,7 +372,28 @@ public sealed class DashboardController : ControllerBase
             breaks,
             status,
             record?.Source ?? (hasRecord ? DetectionRecord.SourceComskip : "none"),
-            _cuts.IsBusy(item.Id) || _manager.IsInFlight(item.Id));
+            _cuts.IsBusy(item.Id) || _manager.IsInFlight(item.Id),
+            status == "cut" ? CutRowOf(item) : null);
+    }
+
+    private CutRow? CutRowOf(BaseItem item)
+    {
+        if (!_cutStore.TryGet(item.Id, out var record))
+        {
+            return null;
+        }
+
+        var backup = TrimBackups.Find(item.Path);
+        long? bytes = null;
+        try
+        {
+            bytes = backup is null ? null : new System.IO.FileInfo(backup).Length;
+        }
+        catch (System.IO.IOException)
+        {
+        }
+
+        return new CutRow(record.SecondsBefore, bytes, backup is null ? null : _backups.ExpiresUtc(backup));
     }
 
     private async Task<IReadOnlyList<OtherSegment>> OthersAsync(BaseItem item)

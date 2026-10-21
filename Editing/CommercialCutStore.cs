@@ -19,6 +19,7 @@ namespace Jellyfin.Plugin.ComskipSegments.Editing;
 /// <param name="SecondsBefore">The uncut length.</param>
 /// <param name="OwnBackup">The cut made the kept original (no earlier trim had), so Undo brings back exactly what was cut.</param>
 /// <param name="ForeignEdlAside">Another program's .edl, kept beside the original because it no longer matched the cut file.</param>
+/// <param name="Path">The recording's file, to find it again when it's moved (null on cuts from before 1.3.1).</param>
 public sealed record CommercialCutRecord(
     IReadOnlyList<KeptPart> Parts,
     IReadOnlyList<CommercialBreak> BreaksBefore,
@@ -26,7 +27,8 @@ public sealed record CommercialCutRecord(
     double SecondsBefore,
     bool OwnBackup,
     string? ForeignEdlAside,
-    DateTime CutUtc);
+    DateTime CutUtc,
+    string? Path = null);
 
 /// <summary>The commercial cuts, in one small JSON file beside the plugin's other state.</summary>
 public sealed class CommercialCutStore
@@ -66,6 +68,17 @@ public sealed class CommercialCutStore
         lock (_lock)
         {
             _records[itemId] = record;
+            Persist();
+        }
+    }
+
+    /// <summary>The recording is a new item now (moved to another folder).</summary>
+    public void Move(Guid fromId, Guid toId, CommercialCutRecord record)
+    {
+        lock (_lock)
+        {
+            _records.Remove(fromId);
+            _records[toId] = record;
             Persist();
         }
     }

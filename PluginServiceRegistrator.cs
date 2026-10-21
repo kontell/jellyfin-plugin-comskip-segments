@@ -38,6 +38,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ProgramStart.ProgramStartService>();
         serviceCollection.AddSingleton<Editing.CommercialCutStore>();
         serviceCollection.AddSingleton<Editing.CommercialCutService>();
+        serviceCollection.AddHostedService<Editing.CutFollower>();
         serviceCollection.AddSingleton<Editing.OverviewService>();
         serviceCollection.AddHostedService<Editing.OverviewCleaner>();
 

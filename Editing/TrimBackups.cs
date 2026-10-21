@@ -98,14 +98,44 @@ public sealed class TrimBackups
         }
     }
 
-    /// <summary>Deletes the backups whose time is up; drops entries whose file is already gone.</summary>
+    /// <summary>
+    /// <paramref name="backupPath"/> turned up in another folder (JellyDVR Space moved the recording
+    /// with it): the undo time of the one of that name that's gone from where it was carries over.
+    /// </summary>
+    public void Follow(string backupPath)
+    {
+        lock (_lock)
+        {
+            if (_expiries.ContainsKey(backupPath))
+            {
+                return;
+            }
+
+            var name = Path.GetFileName(backupPath);
+            var old = _expiries.Keys.FirstOrDefault(k => string.Equals(Path.GetFileName(k), name, StringComparison.Ordinal) && !File.Exists(k));
+            if (old is null)
+            {
+                return;
+            }
+
+            _expiries[backupPath] = _expiries[old];
+            _expiries.Remove(old);
+            Persist();
+            _logger.LogInformation("The kept original {Old} moved to {New}; it still goes at {Expires}", old, backupPath, _expiries[backupPath]);
+        }
+    }
+
+    /// <summary>
+    /// Deletes the backups whose time is up. One that's gone from its place is only dropped then
+    /// too: it may have moved, and <see cref="Follow"/> picks it up when its recording turns up.
+    /// </summary>
     public void DeleteExpired()
     {
         List<string> due;
         lock (_lock)
         {
             var now = DateTime.UtcNow;
-            due = _expiries.Where(e => e.Value <= now || !File.Exists(e.Key)).Select(e => e.Key).ToList();
+            due = _expiries.Where(e => e.Value <= now).Select(e => e.Key).ToList();
         }
 
         foreach (var path in due)

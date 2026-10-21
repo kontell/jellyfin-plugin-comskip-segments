@@ -375,15 +375,18 @@
                 $("#CsdRows").innerHTML = slice.length === 0 ? '<tr><td colspan="7">Nothing here.</td></tr>' : slice.map(function (r) {
                     var title = r.Series ? r.Series : r.Name;
                     var sub = r.Series ? (r.Episode ? r.Episode + " · " : "") + r.Name : (r.Kind === "movie" ? "Movie" : "Video");
-                    var len = r.Seconds > 0 ? r.Seconds : 1;
+                    var len = r.Seconds > 0 ? r.Seconds : 1, c = r.Cut;
                     return "<tr>"
                         + "<td><div style=\"font-weight:600\">" + esc(title) + '</div><div class="csd-sub">' + esc(sub) + (r.Busy ? " · working on it…" : "") + "</div></td>"
                         + '<td class="csd-sub" style="white-space:nowrap">' + (r.Recorded ? new Date(r.Recorded).toLocaleDateString() : "") + "</td>"
                         + '<td class="csd-mono">' + (r.Seconds > 0 ? clock(r.Seconds) : "") + "</td>"
-                        + '<td><div class="csd-bar">' + bar(r.Breaks, len) + "</div></td>"
+                        + (c ? '<td class="csd-sub">Was ' + clock(c.SecondsBefore) + ". " + originalText(c) + "</td>"
+                            : '<td><div class="csd-bar">' + bar(r.Breaks, len) + "</div></td>")
                         + '<td style="white-space:nowrap">' + (r.Breaks.length ? r.Breaks.length + " · " + clock(total(r.Breaks)) : "—") + "</td>"
                         + "<td>" + sourceBadge(r) + "</td>"
-                        + '<td style="text-align:right"><button type="button" class="csd-btn" data-open="' + r.Id + '">Open</button></td>'
+                        + '<td style="text-align:right;white-space:nowrap">'
+                        + (c && c.OriginalBytes != null ? '<button type="button" class="csd-btn" data-delorig="' + r.Id + '">Delete original</button> ' : "")
+                        + '<button type="button" class="csd-btn" data-open="' + r.Id + '">Open</button></td>'
                         + "</tr>";
                 }).join("");
                 $("#CsdCount").textContent = shown.length === 0 ? "" : "Showing " + (state.page * PAGE_SIZE + 1) + "–" + (state.page * PAGE_SIZE + slice.length) + " of " + shown.length;
@@ -407,11 +410,43 @@
             $("#CsdPrev").addEventListener("click", function () { state.page--; renderList(); });
             $("#CsdNext").addEventListener("click", function () { state.page++; renderList(); });
             $("#CsdRows").addEventListener("click", function (e) {
-                var b = e.target.closest("[data-open]");
+                var b = e.target.closest("[data-open]"), d = e.target.closest("[data-delorig]");
                 if (b) {
                     openEditor(b.getAttribute("data-open"));
+                } else if (d) {
+                    var row = state.rows.filter(function (r) { return r.Id === d.getAttribute("data-delorig"); })[0];
+                    deleteOriginal(row.Id, row.Cut, d, function (r) {
+                        if (r.Ok) {
+                            loadList();
+                        } else {
+                            d.disabled = false;
+                            d.title = r.Message;
+                        }
+                    });
                 }
             });
+
+            // "4.1 GB, kept until 28/10/2026." / "Not kept."
+            function originalText(c) {
+                return c.OriginalBytes == null ? "The original isn't kept."
+                    : "The original (" + gb(c.OriginalBytes) + ") is kept" + (c.UndoUntil ? " until " + new Date(c.UndoUntil).toLocaleDateString() : "") + ".";
+            }
+
+            function gb(bytes) {
+                return (bytes / 1e9).toFixed(1) + " GB";
+            }
+
+            // Frees the kept original's space; the cut can't be undone after.
+            function deleteOriginal(id, c, btn, done) {
+                if (!window.confirm("Delete the original recording" + (c && c.OriginalBytes != null ? " (" + gb(c.OriginalBytes) + ")" : "")
+                    + " for good? The commercials stay cut, and the cut can't be undone any more.")) {
+                    return;
+                }
+                btn.disabled = true;
+                api("POST", "ComskipSegments/Dashboard/" + id + "/DeleteOriginal").then(done, function () {
+                    done({ Ok: false, Message: "Couldn't delete the original." });
+                });
+            }
 
             // ---- One recording ----
 
@@ -1804,8 +1839,9 @@
                     html = (d.LastCut && d.LastCut.Ok ? "<div class=\"csd-ok\">" + esc(d.LastCut.Message) + "</div>" : "")
                         + "<div class=\"csd-row\" style=\"margin-top:10px\"><span class=\"csd-grow\">Commercials cut " + new Date(d.Cut.CutUtc).toLocaleString()
                         + ": " + d.Cut.Breaks + " break(s), " + clock(d.Cut.SecondsBefore) + " → " + clock(d.Row.Seconds) + ". "
-                        + (d.Cut.CanUndo ? (d.Cut.UndoUntil ? "The original is kept until " + new Date(d.Cut.UndoUntil).toLocaleDateString() + "." : "The original is kept.") : "The original wasn't kept, so it can't be undone.")
-                        + "</span>" + (d.Cut.CanUndo ? "<button type=\"button\" class=\"csd-btn\" id=\"CsdUndo\">Undo cut</button>" : "") + "</div>"
+                        + (d.Cut.CanUndo ? (d.Cut.UndoUntil ? "The original is kept until " + new Date(d.Cut.UndoUntil).toLocaleDateString() + "." : "The original is kept.") : "The original isn't kept, so the cut can't be undone.")
+                        + "</span>" + (d.Cut.CanUndo ? "<button type=\"button\" class=\"csd-btn\" id=\"CsdDelOrig\">Delete original</button>"
+                            + "<button type=\"button\" class=\"csd-btn\" id=\"CsdUndo\">Undo cut</button>" : "") + "</div>"
                         + "<div id=\"CsdUndoResult\" class=\"fieldDescription\"></div>";
                 }
                 box.innerHTML = html;
@@ -1816,6 +1852,16 @@
                 if (e.target.id === "CsdStop") {
                     e.target.disabled = true;
                     api("POST", "ComskipSegments/Cuts/" + ed.id + "/Stop").catch(function () {});
+                } else if (e.target.id === "CsdDelOrig") {
+                    var id = ed.id;
+                    deleteOriginal(id, ed.d.Row.Cut, e.target, function (r) {
+                        if (r.Ok) {
+                            loadDetail(id).then(function () { $("#CsdUndoResult").textContent = r.Message; });
+                        } else {
+                            $("#CsdUndoResult").textContent = r.Message;
+                            e.target.disabled = false;
+                        }
+                    });
                 } else if (e.target.id === "CsdUndo") {
                     if (!window.confirm("Put the original recording back, with its commercial breaks?")) {
                         return;

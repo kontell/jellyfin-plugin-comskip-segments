@@ -236,7 +236,7 @@ public sealed class CommercialCutService
         // record included), so the records are written after that.
         var foreignAside = PutEdlAside(path);
         var map = new CutMap(result.Kept);
-        _store.Save(item.Id, new CommercialCutRecord(result.Kept, record.Breaks, record.Source, duration, !hadBackup, foreignAside, DateTime.UtcNow));
+        _store.Save(item.Id, new CommercialCutRecord(result.Kept, record.Breaks, record.Source, duration, !hadBackup, foreignAside, DateTime.UtcNow, path));
         await RefreshAsync(item).ConfigureAwait(false);
         _detections.Save(item.Id, new DetectionRecord(DetectionStatus.NoCommercials, Array.Empty<CommercialBreak>(), DateTime.UtcNow, DetectionRecord.SourceCut));
         MoveProgramStart(item, map.Forward);
@@ -365,6 +365,49 @@ public sealed class CommercialCutService
         await PublishAsync(item, CancellationToken.None).ConfigureAwait(false);
         _logger.LogInformation("Commercial cut undone: {Path} is back to the original with {Count} break(s)", item.Path, record.BreaksBefore.Count);
         return new EditResult(true, $"The original is back, with its {record.BreaksBefore.Count} commercial break(s).");
+    }
+
+    /// <summary>
+    /// "Delete original": frees the space the kept original takes before its time is up. The
+    /// recording stays cut; it just can't be undone any more.
+    /// </summary>
+    public EditResult DeleteOriginal(BaseItem item)
+    {
+        if (!_store.TryGet(item.Id, out var record))
+        {
+            return new EditResult(false, "This recording's commercials weren't cut here.");
+        }
+
+        if (TrimBackups.Find(item.Path) is not { } backup)
+        {
+            return new EditResult(false, "The original is already gone.");
+        }
+
+        if (_cuts.IsBusy(item.Id))
+        {
+            return new EditResult(false, "This recording is being cut or scanned; wait for that to finish.");
+        }
+
+        try
+        {
+            var bytes = new FileInfo(backup).Length;
+            File.Delete(backup);
+            var edl = TrimBackups.EdlFor(backup);
+            if (File.Exists(edl))
+            {
+                File.Delete(edl);
+            }
+
+            _backups.Forget(backup);
+            _store.Save(item.Id, record with { ForeignEdlAside = null });
+            _logger.LogInformation("Deleted the kept original {Path} ({Bytes} bytes) on request", backup, bytes);
+            return new EditResult(true, $"The original is deleted: {bytes / 1e9:0.0} GB freed. The cut can't be undone now.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not delete the kept original {Path}", backup);
+            return new EditResult(false, $"Couldn't delete the original: {ex.Message}");
+        }
     }
 
     /// <summary>
