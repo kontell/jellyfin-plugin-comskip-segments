@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Comskip;
@@ -114,6 +116,195 @@ public sealed class RecordingTrimmer
         }
     }
 
+    /// <summary>
+    /// Cuts the commercials out: copies each kept part (each starting on a keyframe, see
+    /// <see cref="Keyframes"/>) to a hidden file beside the recording, joins them, checks the
+    /// joined file is as long as the parts together, and swaps it in like a trim (the original kept
+    /// for Undo the same way). The original is untouched until that swap.
+    /// A copied part's sound starts a little before its keyframe (ffmpeg keeps the audio from where
+    /// it lands in the file, a fraction of a second earlier) and its end runs a few frames on, so
+    /// what was really kept is measured from each part and returned: resume positions move by that.
+    /// </summary>
+    /// <summary>How a commercial cut ended, and what it really kept (see <see cref="ApplyPartsAsync"/>).</summary>
+    public sealed record PartsOutcome(TrimOutcome Outcome, IReadOnlyList<KeptPart> Kept);
+
+    public async Task<PartsOutcome> ApplyPartsAsync(
+        string ffmpegPath,
+        string workDir,
+        string recordingPath,
+        IReadOnlyList<KeptPart> parts,
+        double totalSeconds,
+        bool keepOriginal,
+        CancellationToken cancellationToken,
+        CutJob? job = null)
+    {
+        if (parts.Count == 0 || totalSeconds <= 0)
+        {
+            return Failed("nothing would be left of the recording");
+        }
+
+        var ext = Path.GetExtension(recordingPath);
+        var keptSeconds = parts.Sum(p => p.Length);
+        var keptBytes = (long)(SafeLength(recordingPath) * Math.Min(1, keptSeconds / totalSeconds));
+        var output = TempBeside(recordingPath, ext) ?? Path.Combine(workDir, $"cut-{Guid.NewGuid():N}{ext}");
+        var folder = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(folder);
+
+        // The parts and the joined copy are on the drive at once.
+        var free = FreeBytes(output);
+        if (free >= 0 && free < (2 * keptBytes) + MinFreeAfterCut)
+        {
+            return Failed($"not enough free space for the cut ({free / 1073741824.0:F1} GB free, needs {((2 * keptBytes) + MinFreeAfterCut) / 1073741824.0:F1} GB)");
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(output);
+        var partPaths = parts.Select((_, i) => Path.Combine(folder, $"{stem}-part{i + 1}{ext}")).ToList();
+        var listPath = Path.Combine(folder, $"{stem}-parts.txt");
+        var kept = new List<KeptPart>();
+        try
+        {
+            if (job is not null)
+            {
+                job.Bytes = 2 * keptBytes;
+                job.Phase = CutJob.PhaseCutting;
+            }
+
+            for (var i = 0; i < parts.Count; i++)
+            {
+                if (job is not null)
+                {
+                    job.Detail = $"Copying part {i + 1} of {parts.Count}";
+                    job.BytesBefore = partPaths.Take(i).Sum(SafeLength);
+                    job.TempPath = partPaths[i];
+                }
+
+                var part = parts[i];
+                var args = new List<string> { "-y", "-nostdin" };
+                if (part.Start > 0)
+                {
+                    // Just before the part's keyframe: ffmpeg starts the copy on the first keyframe from here.
+                    args.AddRange(new[] { "-ss", Math.Max(0, part.Start - Keyframes.Margin).ToString("F3", CultureInfo.InvariantCulture) });
+                }
+
+                args.AddRange(new[] { "-i", recordingPath });
+                if (part.End < totalSeconds - 0.5)
+                {
+                    args.AddRange(new[] { "-t", (part.End - Math.Max(0, part.Start - Keyframes.Margin)).ToString("F3", CultureInfo.InvariantCulture) });
+                }
+
+                // -f mpegts: see RunFfmpeg (a .mpg name would otherwise give MPEG-PS).
+                args.AddRange(new[] { "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "mpegts", partPaths[i] });
+                var copied = await RunProcess(Psi(ffmpegPath, args), recordingPath, partPaths[i], cancellationToken).ConfigureAwait(false);
+                if (!copied.Success)
+                {
+                    return Failed(copied.Message);
+                }
+
+                // What the part really holds: its sound may start a little before its keyframe, and
+                // the copy runs to the end of the frame or audio packet at its end. The join lays the
+                // parts end to end by these lengths.
+                var start = part.Start > 0 ? Math.Max(0, part.Start - await AudioLeadAsync(partPaths[i], cancellationToken).ConfigureAwait(false)) : 0;
+                var (_, length) = await AudioChannelScanner.ProbeFormatTimes(_encoder.ProbePath, partPaths[i], cancellationToken).ConfigureAwait(false);
+                kept.Add(new KeptPart(start, length > 0 ? start + length : part.End));
+            }
+
+            if (job is not null)
+            {
+                job.Detail = "Joining the parts";
+                job.BytesBefore = partPaths.Sum(SafeLength);
+                job.TempPath = output;
+            }
+
+            await File.WriteAllLinesAsync(listPath, partPaths.Select(p => "file '" + p.Replace("'", "'\\''", StringComparison.Ordinal) + "'"), cancellationToken).ConfigureAwait(false);
+            var joined = await RunProcess(
+                Psi(ffmpegPath, new[] { "-y", "-nostdin", "-f", "concat", "-safe", "0", "-i", listPath, "-map", "0", "-c", "copy", "-f", "mpegts", output }),
+                recordingPath, output, cancellationToken).ConfigureAwait(false);
+            if (!joined.Success)
+            {
+                return Failed(joined.Message);
+            }
+
+            foreach (var p in partPaths)
+            {
+                TryDelete(p);
+            }
+
+            if (job is not null)
+            {
+                job.Detail = "Checking the new file";
+            }
+
+            // The whole of it has to be there: as long as the parts together, give or take a frame or two a join.
+            var (_, joinedSeconds) = await AudioChannelScanner.ProbeFormatTimes(_encoder.ProbePath, output, cancellationToken).ConfigureAwait(false);
+            var keptReally = kept.Sum(p => p.Length);
+            if (joinedSeconds <= 0 || Math.Abs(joinedSeconds - keptReally) > Math.Max(2, parts.Count * 0.5))
+            {
+                _logger.LogWarning("Commercial cut of {Path}: the joined file is {Joined:F1}s, the parts {Kept:F1}s; leaving the recording as it was", recordingPath, joinedSeconds, keptReally);
+                return Failed($"the cut file came out {Clock(joinedSeconds)} long instead of {Clock(keptReally)}; the recording was left as it was");
+            }
+
+            if (job is not null)
+            {
+                job.Detail = "Putting it in place";
+                job.Bytes = SafeLength(output);
+                job.BytesBefore = 0;
+                job.FinalPath = recordingPath;
+                job.Phase = CutJob.PhaseFinishing;
+            }
+
+            return new PartsOutcome(SwapIntoPlace(recordingPath, output, keepOriginal), kept);
+        }
+        finally
+        {
+            foreach (var p in partPaths)
+            {
+                TryDelete(p);
+            }
+
+            TryDelete(listPath);
+            TryDelete(output);
+        }
+    }
+
+    private static PartsOutcome Failed(string message) => new(new TrimOutcome(false, null, message), Array.Empty<KeptPart>());
+
+    /// <summary>How long a copied part's sound runs before its first picture, in seconds (0 when it can't be read).</summary>
+    private async Task<double> AudioLeadAsync(string partPath, CancellationToken ct)
+    {
+        try
+        {
+            // Keyframe times are from the start of the file, which is where its sound starts.
+            var keys = await Keyframes.AroundAsync(_encoder.ProbePath, partPath, 0, 3, ct).ConfigureAwait(false);
+            return keys.Count > 0 ? Math.Clamp(keys[0], 0, 2) : 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not read where the picture starts in {Path}", partPath);
+            return 0;
+        }
+    }
+
+    private static ProcessStartInfo Psi(string fileName, IEnumerable<string> args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        return psi;
+    }
+
+    private static string Clock(double seconds) =>
+        TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+
     private async Task<(bool Success, string Message)> RunFfmpeg(
         string ffmpegPath, string inputPath, string outputPath, TrimPlan plan, CancellationToken cancellationToken)
     {
@@ -158,6 +349,11 @@ public sealed class RecordingTrimmer
         psi.ArgumentList.Add("mpegts");
         psi.ArgumentList.Add(outputPath);
 
+        return await RunProcess(psi, inputPath, outputPath, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(bool Success, string Message)> RunProcess(ProcessStartInfo psi, string inputPath, string outputPath, CancellationToken cancellationToken)
+    {
         var log = new OutputTail();
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => log.Add(e.Data);
@@ -186,16 +382,16 @@ public sealed class RecordingTrimmer
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to launch ffmpeg for audio-trim of {Path}", inputPath);
+            _logger.LogError(ex, "Failed to launch ffmpeg to cut {Path}", inputPath);
             return (false, $"could not launch ffmpeg: {ex.Message}");
         }
 
         if (process.ExitCode != 0 || !File.Exists(outputPath))
         {
             _logger.LogWarning(
-                "ffmpeg audio-trim failed for {Path} (exit code {ExitCode}).\n--- ffmpeg output (tail) ---\n{Output}",
+                "ffmpeg cut failed for {Path} (exit code {ExitCode}).\n--- ffmpeg output (tail) ---\n{Output}",
                 inputPath, process.ExitCode, Tail(log.ToString(), 25));
-            return (false, $"ffmpeg exited {process.ExitCode}");
+            return (false, $"ffmpeg exited {process.ExitCode}: {Tail(log.ToString(), 1)}");
         }
 
         return (true, "ok");

@@ -228,6 +228,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public int TrimUndoDays { get; set; } = 7;
 
     /// <summary>
+    /// "Cut commercials out": a cut copies the video as it is, so each kept part has to start on a
+    /// keyframe. <see cref="CutKeepAd"/> (default) starts it on the keyframe at or before the end of
+    /// the break, keeping a second or so of the ad; <see cref="CutKeepShow"/> on the one after,
+    /// losing a second or so of the show instead.
+    /// </summary>
+    public string CutRounding { get; set; } = CutKeepAd;
+
+    /// <summary>
     /// Users (Jellyfin user ids) besides administrators who may edit recordings: program start,
     /// remembered cards, trims and their undo, the audio fix, and scanning for or removing
     /// commercials. Administrators always may; everyone else sees no edit buttons.
@@ -280,6 +288,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// startup when it's missing, e.g. after a jellyfin-web upgrade; only where Jellyfin may write the file.
     /// </summary>
     public bool AutoInstallWebOverlay { get; set; } = true;
+
+    public const string CutKeepAd = "keep-ad";
+    public const string CutKeepShow = "keep-show";
 
     public const string ProgramStartMarker = "marker";
     public const string ProgramStartTrim = "trim";

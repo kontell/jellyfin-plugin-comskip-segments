@@ -70,3 +70,20 @@ public static class EdlParser
         return breaks;
     }
 }
+
+/// <summary>Writes commercial breaks as an .edl, the way Comskip does (seconds, tab-separated, action 0).</summary>
+public static class EdlWriter
+{
+    public static void Write(string edlPath, IEnumerable<CommercialBreak> breaks)
+    {
+        var lines = new List<string>();
+        foreach (var b in breaks)
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"{b.StartTicks / 1e7:F2}\t{b.EndTicks / 1e7:F2}\t0"));
+        }
+
+        var tmp = edlPath + ".tmp";
+        File.WriteAllLines(tmp, lines);
+        File.Move(tmp, edlPath, overwrite: true);
+    }
+}

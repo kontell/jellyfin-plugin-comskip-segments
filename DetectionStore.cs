@@ -23,8 +23,9 @@ public enum DetectionStatus
 }
 
 /// <param name="Source">Where the breaks came from: <see cref="SourceComskip"/> (this
-/// plugin ran Comskip) or <see cref="SourceEdl"/> (an .edl another program — SageTV,
-/// Channels DVR, Emby — left beside the video). Null on records written before this
+/// plugin ran Comskip), <see cref="SourceEdl"/> (an .edl another program — SageTV,
+/// Channels DVR, Emby — left beside the video), <see cref="SourceEdited"/> or
+/// <see cref="SourceCut"/>; "cleared" after Remove commercials. Null on records written before this
 /// field existed, which were all Comskip runs.</param>
 public sealed record DetectionRecord(
     DetectionStatus Status,
@@ -34,6 +35,12 @@ public sealed record DetectionRecord(
 {
     public const string SourceComskip = "comskip";
     public const string SourceEdl = "edl";
+
+    /// <summary>Set by hand on the segments dashboard: automatic detection leaves them alone.</summary>
+    public const string SourceEdited = "edited";
+
+    /// <summary>The commercials were cut out of the file (see <see cref="Editing.CommercialCutService"/>).</summary>
+    public const string SourceCut = "cut";
 }
 
 /// <summary>

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Commercial segments</title>
+</head>
+<body>
+<div id="ComskipDashboardPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox">
+    <style>
+        #ComskipDashboardPage .csd-bar { position: relative; height: 12px; background: rgba(255,255,255,0.14); border-radius: 3px; overflow: hidden; }
+        #ComskipDashboardPage .csd-bar span { position: absolute; top: 0; bottom: 0; background: #e53935; }
+        #ComskipDashboardPage .csd-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 1em 0; }
+        #ComskipDashboardPage .csd-chip { min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+        #ComskipDashboardPage .csd-chip[aria-pressed="true"] { border-color: #00a4dc; background: rgba(0,164,220,0.18); }
+        #ComskipDashboardPage .csd-tablebox { overflow-x: auto; }
+        #ComskipDashboardPage table.csd-table { width: 100%; min-width: 820px; border-collapse: collapse; }
+        #ComskipDashboardPage .csd-table th { text-align: left; font-weight: 500; opacity: 0.75; padding: 10px; font-size: 0.9em; }
+        #ComskipDashboardPage .csd-table td { padding: 10px; border-top: 1px solid rgba(255,255,255,0.1); vertical-align: middle; }
+        #ComskipDashboardPage .csd-sub { opacity: 0.7; font-size: 0.9em; }
+        #ComskipDashboardPage .csd-mono { font-family: monospace; }
+        #ComskipDashboardPage .csd-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; background: rgba(255,255,255,0.12); }
+        #ComskipDashboardPage .csd-badge.comskip { background: #1e3a4a; color: #9fdcf5; }
+        #ComskipDashboardPage .csd-badge.edited { background: #4a3410; color: #ffd08a; }
+        #ComskipDashboardPage .csd-badge.cut { background: #173326; color: #9be3bf; }
+        #ComskipDashboardPage .csd-badge.failed { background: #3a1e1e; color: #f5b0b0; }
+        #ComskipDashboardPage .csd-panel { background: rgba(255,255,255,0.06); border-radius: 10px; padding: 16px 18px; margin: 1em 0; }
+        #ComskipDashboardPage .csd-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        #ComskipDashboardPage .csd-grow { flex: 1 1 auto; }
+        #ComskipDashboardPage .csd-btn { min-height: 40px; padding: 0 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06); color: inherit; font: inherit; cursor: pointer; }
+        #ComskipDashboardPage .csd-btn:disabled { opacity: 0.45; cursor: default; }
+        #ComskipDashboardPage .csd-btn.primary { background: #00a4dc; border-color: #00a4dc; color: #001018; font-weight: 600; }
+        #ComskipDashboardPage .csd-btn.danger { border-color: #e53935; color: #ffcdd2; }
+        #ComskipDashboardPage .csd-btn.danger.solid { background: #e53935; color: #fff; font-weight: 600; }
+        #ComskipDashboardPage .csd-split { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+        #ComskipDashboardPage .csd-preview { flex: 999 1 480px; min-width: 0; }
+        #ComskipDashboardPage .csd-side { flex: 1 1 260px; min-width: 0; }
+        #ComskipDashboardPage .csd-frame { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+        #ComskipDashboardPage .csd-frame img { width: 100%; height: 100%; object-fit: contain; }
+        #ComskipDashboardPage .csd-frame .csd-time { position: absolute; left: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #fff; }
+        #ComskipDashboardPage .csd-frame .csd-where { position: absolute; right: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(229,57,53,0.85); color: #fff; }
+        #ComskipDashboardPage .csd-timeline { position: relative; height: 52px; background: rgba(255,255,255,0.12); border-radius: 6px; margin-top: 22px; cursor: pointer; touch-action: none; user-select: none; }
+        #ComskipDashboardPage .csd-block { position: absolute; top: 6px; bottom: 6px; background: #e53935; border-radius: 4px; opacity: 0.85; }
+        #ComskipDashboardPage .csd-block.sel { opacity: 1; box-shadow: 0 0 0 2px #fff; }
+        #ComskipDashboardPage .csd-block i { position: absolute; top: 0; bottom: 0; width: 8px; background: rgba(255,255,255,0.55); cursor: ew-resize; }
+        #ComskipDashboardPage .csd-block i.l { left: 0; border-radius: 4px 0 0 4px; }
+        #ComskipDashboardPage .csd-block i.r { right: 0; border-radius: 0 4px 4px 0; }
+        #ComskipDashboardPage .csd-other { position: absolute; top: 0; height: 5px; background: #64b5f6; }
+        #ComskipDashboardPage .csd-head { position: absolute; top: -8px; bottom: -8px; width: 2px; background: #fff; pointer-events: none; }
+        #ComskipDashboardPage .csd-ticks { position: relative; height: 16px; font-size: 0.8em; opacity: 0.7; }
+        #ComskipDashboardPage .csd-ticks span { position: absolute; top: 0; }
+        #ComskipDashboardPage .csd-breaks td { padding: 6px 8px; }
+        #ComskipDashboardPage .csd-breaks tr.sel { background: rgba(0,164,220,0.12); }
+        #ComskipDashboardPage .csd-breaks input { width: 130px; min-height: 36px; box-sizing: border-box; background: rgba(0,0,0,0.3); color: inherit; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 0 8px; font-family: monospace; }
+        #ComskipDashboardPage .csd-breaks input.bad { border-color: #e53935; }
+        #ComskipDashboardPage .csd-warn { background: rgba(245,165,36,0.14); color: #ffe0b2; border-radius: 8px; padding: 12px 14px; }
+        #ComskipDashboardPage .csd-error { background: rgba(229,57,53,0.16); color: #ffcdd2; border-radius: 8px; padding: 12px 14px; }
+        #ComskipDashboardPage .csd-ok { background: rgba(46,163,107,0.16); color: #c8f0da; border-radius: 8px; padding: 12px 14px; }
+        #ComskipDashboardPage .csd-progress { height: 10px; background: rgba(255,255,255,0.14); border-radius: 5px; overflow: hidden; margin: 10px 0; }
+        #ComskipDashboardPage .csd-progress div { height: 100%; background: #00a4dc; width: 0; }
+        #ComskipDashboardPage .csd-hidden { display: none !important; }
+    </style>
+    <div data-role="content">
+        <div class="content-primary">
+            <div class="csd-row" style="justify-content: space-between;">
+                <h2 style="margin: 0.4em 0;">Commercial segments</h2>
+                <a is="emby-linkbutton" class="button-link" href="#/configurationpage?name=Comskip%20Commercial%20Segments">Settings</a>
+            </div>
+
+            <!-- Every recording -->
+            <div id="CsdList">
+                <div class="fieldDescription">Every recording the plugin has looked at: check its commercial breaks, fix them by hand, or cut them out of the file.</div>
+                <div class="csd-chips" id="CsdFilters" role="group" aria-label="Show"></div>
+                <div class="inputContainer" style="max-width: 420px;">
+                    <label class="inputLabel inputLabelUnfocused" for="CsdSearch">Search</label>
+                    <input id="CsdSearch" type="search" is="emby-input" placeholder="Title or show" />
+                </div>
+                <div class="csd-tablebox">
+                    <table class="csd-table">
+                        <thead><tr><th>Recording</th><th>Added</th><th>Length</th><th style="width: 34%;">Commercials</th><th>Total</th><th>From</th><th></th></tr></thead>
+                        <tbody id="CsdRows"><tr><td colspan="7">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="csd-row" style="justify-content: space-between; margin-top: 1em;">
+                    <span id="CsdCount" class="csd-sub"></span>
+                    <span class="csd-row">
+                        <button type="button" class="csd-btn" id="CsdPrev">Previous</button>
+                        <button type="button" class="csd-btn" id="CsdNext">Next</button>
+                    </span>
+                </div>
+            </div>
+
+            <!-- One recording -->
+            <div id="CsdEditor" class="csd-hidden">
+                <button type="button" class="csd-btn" id="CsdBack">‹ All recordings</button>
+                <div class="csd-row" style="margin: 0.8em 0 0.3em;">
+                    <h3 id="CsdTitle" style="margin: 0;"></h3>
+                    <span id="CsdBadges" class="csd-row"></span>
+                </div>
+                <div id="CsdMeta" class="csd-sub"></div>
+
+                <div class="csd-split" style="margin-top: 1em;">
+                    <div class="csd-preview">
+                        <div class="csd-frame">
+                            <img id="CsdImg" alt="The frame at the playhead" />
+                            <span class="csd-time csd-mono" id="CsdTime"></span>
+                            <span class="csd-where csd-hidden" id="CsdWhere"></span>
+                        </div>
+                        <div class="csd-row" style="margin-top: 10px;">
+                            <button type="button" class="csd-btn" data-step="-10" aria-label="Back 10 seconds">−10 s</button>
+                            <button type="button" class="csd-btn" data-step="prev" aria-label="Previous keyframe">‹ Keyframe</button>
+                            <button type="button" class="csd-btn" data-step="next" aria-label="Next keyframe">Keyframe ›</button>
+                            <button type="button" class="csd-btn" data-step="10" aria-label="Forward 10 seconds">+10 s</button>
+                            <span class="csd-grow"></span>
+                            <button type="button" class="csd-btn" id="CsdSetStart">Break starts here</button>
+                            <button type="button" class="csd-btn" id="CsdSetEnd">Break ends here</button>
+                        </div>
+                    </div>
+                    <div class="csd-side csd-panel" style="margin: 0;">
+                        <div id="CsdInfo"></div>
+                        <div class="csd-row" style="margin-top: 12px;">
+                            <button type="button" class="csd-btn" id="CsdRescan">Re-run Comskip</button>
+                            <a is="emby-linkbutton" class="button-link" id="CsdOpen" href="#">Open in Jellyfin</a>
+                        </div>
+                        <div id="CsdRescanResult" class="fieldDescription"></div>
+                    </div>
+                </div>
+
+                <div class="csd-panel">
+                    <div class="csd-ticks" id="CsdTicks"></div>
+                    <div class="csd-timeline" id="CsdTimeline" aria-label="Timeline: click to move the playhead, drag a break's edges"></div>
+                    <div class="fieldDescription" style="margin-top: 10px;">Click to move the playhead. Drag a break's edges to move its start or end. Blue along the top: other segments (intros, a program-start preview), not edited here.</div>
+                </div>
+
+                <div class="csd-panel">
+                    <div class="csd-row" style="justify-content: space-between;">
+                        <h3 style="margin: 0;">Commercial breaks</h3>
+                        <button type="button" class="csd-btn" id="CsdAdd">+ Add a break at the playhead</button>
+                    </div>
+                    <div class="csd-tablebox">
+                        <table class="csd-table csd-breaks" style="min-width: 640px;">
+                            <thead><tr><th>#</th><th>Start</th><th>End</th><th>Length</th><th></th></tr></thead>
+                            <tbody id="CsdBreaks"></tbody>
+                        </table>
+                    </div>
+                    <div id="CsdNoBreaks" class="fieldDescription csd-hidden">No commercial breaks.</div>
+                </div>
+
+                <div class="csd-panel" id="CsdSaveBox">
+                    <div class="csd-row">
+                        <label class="checkboxContainer" style="margin: 0;">
+                            <input type="checkbox" is="emby-checkbox" id="CsdWriteEdl" />
+                            <span>Also rewrite the .edl file beside the recording</span>
+                        </label>
+                        <span class="csd-grow"></span>
+                        <button type="button" class="csd-btn" id="CsdDiscard">Discard changes</button>
+                        <button type="button" class="csd-btn primary" id="CsdSave">Save</button>
+                        <button type="button" class="csd-btn danger" id="CsdCutBtn">Cut commercials out…</button>
+                    </div>
+                    <div class="fieldDescription">Saved breaks are kept when Comskip runs automatically; only Re-run Comskip replaces them.</div>
+                    <div id="CsdSaveResult" class="fieldDescription"></div>
+                </div>
+
+                <!-- Cut: confirm -->
+                <div class="csd-panel csd-hidden" id="CsdCutBox">
+                    <h3 style="margin-top: 0;">Cut the commercials out</h3>
+                    <div class="csd-row csd-sub"><span>Now</span><span class="csd-grow"></span><span class="csd-mono" id="CsdBeforeLen"></span></div>
+                    <div class="csd-bar" id="CsdBeforeBar" style="height: 18px; margin: 4px 0 12px;"></div>
+                    <div class="csd-row csd-sub"><span>After the cut</span><span class="csd-grow"></span><span class="csd-mono" id="CsdAfterLen"></span></div>
+                    <div style="margin: 4px 0 12px;"><div class="csd-bar" id="CsdAfterBar" style="height: 18px; background: rgba(255,255,255,0.3);"></div></div>
+                    <p id="CsdCutHow"></p>
+                    <ul class="csd-sub" style="padding-left: 20px;">
+                        <li>The commercial marks and the .edl go; Comskip won't scan it again on its own.</li>
+                        <li>Anyone part-way through it carries on from the same scene.</li>
+                        <li>Jellyfin re-reads the file, so its length is right everywhere.</li>
+                    </ul>
+                    <div class="csd-warn">Check the breaks first: Comskip sometimes marks part of the show as an ad. A skip only jumps over it; a cut throws it away.</div>
+                    <div class="csd-row" style="justify-content: flex-end; margin-top: 14px;">
+                        <button type="button" class="csd-btn" id="CsdCutCancel">Cancel</button>
+                        <button type="button" class="csd-btn danger solid" id="CsdCutGo">Cut</button>
+                    </div>
+                </div>
+
+                <!-- Cut: progress, result, undo -->
+                <div class="csd-panel csd-hidden" id="CsdCutState"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var page = document.querySelector("#ComskipDashboardPage");
+            var $ = function (sel) { return page.querySelector(sel); };
+            var PAGE_SIZE = 50;
+            var FILTERS = [
+                ["all", "All"], ["detected", "With commercials"], ["none", "No commercials"],
+                ["edited", "Edited by hand"], ["cut", "Cut"], ["failed", "Scan failed"]
+            ];
+            var state = { rows: [], filter: "all", search: "", page: 0 };
+            var ed = null;      // the recording open in the editor
+            var poll = null;
+
+            function esc(s) {
+                return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+                    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+                });
+            }
+
+            function clock(t, tenths) {
+                t = Math.max(0, t || 0);
+                var h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = Math.floor(t % 60);
+                var out = (h ? h + ":" + (m < 10 ? "0" : "") : "") + m + ":" + (s < 10 ? "0" : "") + s;
+                return tenths ? out + "." + Math.floor((t % 1) * 10) : out;
+            }
+
+            // "1:02:03.4", "12:30", "754.2" → seconds; NaN when it can't be read.
+            function parseClock(text) {
+                var parts = String(text).trim().split(":");
+                if (parts.length > 3 || parts.some(function (p) { return p === "" || isNaN(Number(p)); })) {
+                    return NaN;
+                }
+                return parts.reduce(function (sum, p) { return sum * 60 + Number(p); }, 0);
+            }
+
+            function api(type, path, body) {
+                var opts = { type: type, url: ApiClient.getUrl(path), dataType: "json" };
+                if (body !== undefined) {
+                    opts.data = JSON.stringify(body);
+                    opts.contentType = "application/json";
+                }
+                return ApiClient.ajax(opts);
+            }
+
+            function bar(breaks, seconds) {
+                return breaks.map(function (b) {
+                    return '<span style="left:' + (b.Start / seconds * 100) + '%;width:' + ((b.End - b.Start) / seconds * 100) + '%"></span>';
+                }).join("");
+            }
+
+            function total(breaks) {
+                return breaks.reduce(function (sum, b) { return sum + (b.End - b.Start); }, 0);
+            }
+
+            function kind(row) {
+                if (row.Status === "cut") { return "cut"; }
+                if (row.Status === "failed") { return "failed"; }
+                if (row.Source === "edited") { return "edited"; }
+                return row.Status;
+            }
+
+            function sourceBadge(row) {
+                var k = kind(row);
+                var text = k === "cut" ? "Cut" : k === "failed" ? "Scan failed" : k === "edited" ? "Edited"
+                    : row.Status === "none" ? "None found" : row.Source === "edl" ? ".edl file" : "Comskip";
+                return '<span class="csd-badge ' + (k === "detected" ? "comskip" : k) + '">' + text + "</span>";
+            }
+
+            // ---- The list ----
+
+            function loadList() {
+                return api("GET", "ComskipSegments/Dashboard").then(function (r) {
+                    state.rows = r.Items || [];
+                    renderList();
+                }, function () {
+                    $("#CsdRows").innerHTML = '<tr><td colspan="7">Couldn\'t load the recordings.</td></tr>';
+                });
+            }
+
+            function matches(row) {
+                if (state.filter !== "all" && kind(row) !== state.filter) {
+                    return false;
+                }
+                var q = state.search.toLowerCase();
+                return !q || (row.Name + " " + (row.Series || "")).toLowerCase().indexOf(q) >= 0;
+            }
+
+            function renderList() {
+                var counts = {};
+                state.rows.forEach(function (r) { counts[kind(r)] = (counts[kind(r)] || 0) + 1; });
+                counts.all = state.rows.length;
+                $("#CsdFilters").innerHTML = FILTERS.map(function (f) {
+                    return '<button type="button" class="csd-chip" data-filter="' + f[0] + '" aria-pressed="' + (state.filter === f[0]) + '">'
+                        + f[1] + " · " + (counts[f[0]] || 0) + "</button>";
+                }).join("");
+
+                var shown = state.rows.filter(matches);
+                var pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+                state.page = Math.min(state.page, pages - 1);
+                var slice = shown.slice(state.page * PAGE_SIZE, (state.page + 1) * PAGE_SIZE);
+                $("#CsdRows").innerHTML = slice.length === 0 ? '<tr><td colspan="7">Nothing here.</td></tr>' : slice.map(function (r) {
+                    var title = r.Series ? r.Series : r.Name;
+                    var sub = r.Series ? (r.Episode ? r.Episode + " · " : "") + r.Name : (r.Kind === "movie" ? "Movie" : "Video");
+                    var len = r.Seconds > 0 ? r.Seconds : 1;
+                    return "<tr>"
+                        + "<td><div style=\"font-weight:600\">" + esc(title) + '</div><div class="csd-sub">' + esc(sub) + (r.Busy ? " · working on it…" : "") + "</div></td>"
+                        + '<td class="csd-sub" style="white-space:nowrap">' + (r.Recorded ? new Date(r.Recorded).toLocaleDateString() : "") + "</td>"
+                        + '<td class="csd-mono">' + (r.Seconds > 0 ? clock(r.Seconds) : "") + "</td>"
+                        + '<td><div class="csd-bar">' + bar(r.Breaks, len) + "</div></td>"
+                        + '<td style="white-space:nowrap">' + (r.Breaks.length ? r.Breaks.length + " · " + clock(total(r.Breaks)) : "—") + "</td>"
+                        + "<td>" + sourceBadge(r) + "</td>"
+                        + '<td style="text-align:right"><button type="button" class="csd-btn" data-open="' + r.Id + '">Open</button></td>'
+                        + "</tr>";
+                }).join("");
+                $("#CsdCount").textContent = shown.length === 0 ? "" : "Showing " + (state.page * PAGE_SIZE + 1) + "–" + (state.page * PAGE_SIZE + slice.length) + " of " + shown.length;
+                $("#CsdPrev").disabled = state.page === 0;
+                $("#CsdNext").disabled = state.page >= pages - 1;
+            }
+
+            $("#CsdFilters").addEventListener("click", function (e) {
+                var b = e.target.closest("[data-filter]");
+                if (b) {
+                    state.filter = b.getAttribute("data-filter");
+                    state.page = 0;
+                    renderList();
+                }
+            });
+            $("#CsdSearch").addEventListener("input", function () {
+                state.search = this.value;
+                state.page = 0;
+                renderList();
+            });
+            $("#CsdPrev").addEventListener("click", function () { state.page--; renderList(); });
+            $("#CsdNext").addEventListener("click", function () { state.page++; renderList(); });
+            $("#CsdRows").addEventListener("click", function (e) {
+                var b = e.target.closest("[data-open]");
+                if (b) {
+                    openEditor(b.getAttribute("data-open"));
+                }
+            });
+
+            // ---- One recording ----
+
+            function show(editor) {
+                $("#CsdList").classList.toggle("csd-hidden", editor);
+                $("#CsdEditor").classList.toggle("csd-hidden", !editor);
+                if (!editor) {
+                    stopPolling();
+                    ed = null;
+                    loadList();
+                }
+            }
+
+            function openEditor(id) {
+                show(true);
+                $("#CsdTitle").textContent = "Loading…";
+                $("#CsdBadges").innerHTML = "";
+                $("#CsdMeta").textContent = "";
+                $("#CsdSaveResult").textContent = "";
+                $("#CsdRescanResult").textContent = "";
+                $("#CsdCutBox").classList.add("csd-hidden");
+                return loadDetail(id, true);
+            }
+
+            function loadDetail(id, fresh) {
+                return api("GET", "ComskipSegments/Dashboard/" + id).then(function (d) {
+                    var keepHead = ed && ed.id === id && !fresh ? ed.head : 0;
+                    ed = {
+                        id: id,
+                        d: d,
+                        seconds: d.Row.Seconds > 0 ? d.Row.Seconds : 1,
+                        breaks: d.Row.Breaks.map(function (b) { return { Start: b.Start, End: b.End }; }),
+                        sel: -1,
+                        head: keepHead,
+                        dirty: false
+                    };
+                    if (fresh && ed.breaks.length) {
+                        ed.sel = 0;
+                        ed.head = ed.breaks[0].End;
+                    }
+                    $("#CsdWriteEdl").checked = d.Edl === "ours" || (d.Edl === "none" && d.Settings.WriteEdl);
+                    renderEditor();
+                    frame();
+                    watchCut();
+                }, function () {
+                    $("#CsdTitle").textContent = "Couldn't load this recording.";
+                });
+            }
+
+            function renderEditor() {
+                var d = ed.d, r = d.Row;
+                $("#CsdTitle").textContent = r.Series ? r.Series : r.Name;
+                $("#CsdBadges").innerHTML = (r.Series ? '<span class="csd-sub">' + esc((r.Episode ? r.Episode + " · " : "") + r.Name) + "</span>" : "")
+                    + sourceBadge(r) + (ed.dirty ? ' <span class="csd-badge edited">Unsaved changes</span>' : "");
+                $("#CsdMeta").textContent = (r.Recorded ? "Added " + new Date(r.Recorded).toLocaleString() + " · " : "") + clock(r.Seconds)
+                    + (d.Scanned ? " · last scanned or edited " + new Date(d.Scanned).toLocaleString() : "");
+                $("#CsdOpen").setAttribute("href", "#/details?id=" + ed.id);
+
+                var edl = { ours: "Yes, written by this plugin", other: "Yes, another program's (never changed here)", none: "No" }[d.Edl];
+                $("#CsdInfo").innerHTML =
+                    "<div class=\"csd-sub\">Commercials</div><div>" + (ed.breaks.length ? ed.breaks.length + " break(s) · " + clock(total(ed.breaks)) : "None") + "</div>"
+                    + "<div class=\"csd-sub\" style=\"margin-top:8px\">File</div><div class=\"csd-mono\" style=\"word-break:break-all;font-size:0.85em\">" + esc(d.Path) + "</div>"
+                    + "<div class=\"csd-sub\" style=\"margin-top:8px\">.edl beside it</div><div>" + edl + "</div>"
+                    + "<div class=\"csd-sub\" style=\"margin-top:8px\">Other segments</div><div>" + (d.Others.length ? d.Others.map(function (o) {
+                        return esc(o.Type) + " " + clock(o.Start) + "–" + clock(o.End);
+                    }).join("<br>") : "None") + "</div>"
+                    + (d.Scanning ? "<div class=\"csd-warn\" style=\"margin-top:10px\">Comskip is scanning it now.</div>" : "");
+
+                var cut = r.Status === "cut";
+                $("#CsdSaveBox").classList.toggle("csd-hidden", cut);
+                $("#CsdAdd").disabled = cut;
+                $("#CsdSave").disabled = !ed.dirty;
+                $("#CsdDiscard").disabled = !ed.dirty;
+                $("#CsdCutBtn").disabled = ed.dirty || ed.breaks.length === 0 || !!d.CutRefusal;
+                $("#CsdCutBtn").title = ed.dirty ? "Save your changes first" : (d.CutRefusal || "");
+
+                renderTimeline();
+                renderBreaks();
+                renderCutState();
+            }
+
+            function renderTimeline() {
+                var len = ed.seconds;
+                var ticks = [];
+                var step = len > 5400 ? 1200 : len > 1800 ? 600 : 300;
+                for (var t = 0; t <= len; t += step) {
+                    ticks.push('<span style="left:' + (t / len * 100) + '%;transform:translateX(' + (t === 0 ? "0" : "-50%") + ')">' + clock(t) + "</span>");
+                }
+                $("#CsdTicks").innerHTML = ticks.join("");
+                $("#CsdTimeline").innerHTML = ed.d.Others.map(function (o) {
+                    return '<div class="csd-other" style="left:' + (o.Start / len * 100) + "%;width:" + ((o.End - o.Start) / len * 100) + '%"></div>';
+                }).join("") + ed.breaks.map(function (b, i) {
+                    return '<div class="csd-block' + (i === ed.sel ? " sel" : "") + '" data-i="' + i + '" style="left:' + (b.Start / len * 100) + "%;width:" + ((b.End - b.Start) / len * 100) + '%">'
+                        + (ed.d.Row.Status === "cut" ? "" : '<i class="l" data-edge="Start"></i><i class="r" data-edge="End"></i>') + "</div>";
+                }).join("") + '<div class="csd-head" style="left:' + (ed.head / len * 100) + '%"></div>';
+            }
+
+            function renderBreaks() {
+                var cut = ed.d.Row.Status === "cut";
+                $("#CsdNoBreaks").classList.toggle("csd-hidden", ed.breaks.length > 0);
+                $("#CsdBreaks").innerHTML = ed.breaks.map(function (b, i) {
+                    return '<tr data-i="' + i + '"' + (i === ed.sel ? ' class="sel"' : "") + ">"
+                        + "<td>" + (i + 1) + "</td>"
+                        + '<td><input aria-label="Break ' + (i + 1) + ' start" data-field="Start" value="' + clock(b.Start, true) + '"' + (cut ? " disabled" : "") + "></td>"
+                        + '<td><input aria-label="Break ' + (i + 1) + ' end" data-field="End" value="' + clock(b.End, true) + '"' + (cut ? " disabled" : "") + "></td>"
+                        + '<td class="csd-mono">' + clock(b.End - b.Start) + "</td>"
+                        + '<td style="text-align:right;white-space:nowrap"><button type="button" class="csd-btn" data-go="' + i + '">Go to</button> '
+                        + (cut ? "" : '<button type="button" class="csd-btn" data-del="' + i + '" aria-label="Delete break ' + (i + 1) + '">Delete</button>') + "</td>"
+                        + "</tr>";
+                }).join("");
+            }
+
+            function changed() {
+                ed.breaks.sort(function (a, b) { return a.Start - b.Start; });
+                ed.dirty = true;
+                $("#CsdSaveResult").textContent = "";
+                renderEditor();
+            }
+
+            function select(i, goTo) {
+                ed.sel = i;
+                if (goTo && ed.breaks[i]) {
+                    ed.head = ed.breaks[i].Start;
+                    frame();
+                }
+                renderTimeline();
+                renderBreaks();
+            }
+
+            // The picture at the playhead, fetched with the sign-in token (an <img> can't send it).
+            var frameTimer = null;
+            function frame() {
+                $("#CsdTime").textContent = clock(ed.head, true);
+                var inside = ed.breaks.filter(function (b) { return ed.head >= b.Start && ed.head < b.End; })[0];
+                $("#CsdWhere").classList.toggle("csd-hidden", !inside);
+                $("#CsdWhere").textContent = inside ? "In break " + (ed.breaks.indexOf(inside) + 1) : "";
+                renderTimeline();
+                clearTimeout(frameTimer);
+                var id = ed.id, at = ed.head;
+                frameTimer = setTimeout(function () {
+                    fetch(ApiClient.getUrl("ComskipSegments/ProgramStart/" + id + "/Frame", { seconds: at.toFixed(3), width: 960 }), {
+                        headers: { Authorization: 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
+                    }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (b) {
+                        if (b && ed && ed.id === id && ed.head === at) {
+                            var img = $("#CsdImg");
+                            if (img.src && img.src.indexOf("blob:") === 0) {
+                                URL.revokeObjectURL(img.src);
+                            }
+                            img.src = URL.createObjectURL(b);
+                        }
+                    }).catch(function () {});
+                }, 150);
+            }
+
+            function moveHead(t) {
+                ed.head = Math.max(0, Math.min(ed.seconds, t));
+                frame();
+            }
+
+            page.addEventListener("click", function (e) {
+                var b = e.target.closest("[data-step]");
+                if (!b || !ed) {
+                    return;
+                }
+                var step = b.getAttribute("data-step");
+                if (step === "prev" || step === "next") {
+                    var from = step === "prev" ? Math.max(0, ed.head - 0.05) : ed.head;
+                    api("GET", "ComskipSegments/ProgramStart/" + ed.id + "/Keyframes?seconds=" + from.toFixed(3)).then(function (k) {
+                        var t = step === "prev" ? k.Before : k.After;
+                        if (t != null) {
+                            moveHead(t);
+                        }
+                    });
+                } else {
+                    moveHead(ed.head + Number(step));
+                }
+            });
+
+            $("#CsdSetStart").addEventListener("click", function () { setEdge("Start"); });
+            $("#CsdSetEnd").addEventListener("click", function () { setEdge("End"); });
+            function setEdge(edge) {
+                if (ed.d.Row.Status === "cut") {
+                    return;
+                }
+                var b = ed.breaks[ed.sel];
+                if (!b) {
+                    $("#CsdSaveResult").textContent = "Pick a break first (click it on the timeline or in the list).";
+                    return;
+                }
+                if ((edge === "Start" && ed.head >= b.End) || (edge === "End" && ed.head <= b.Start)) {
+                    $("#CsdSaveResult").textContent = edge === "Start" ? "A break has to start before it ends." : "A break has to end after it starts.";
+                    return;
+                }
+                b[edge] = ed.head;
+                var keep = b;
+                changed();
+                ed.sel = ed.breaks.indexOf(keep);
+                renderTimeline();
+                renderBreaks();
+            }
+
+            $("#CsdAdd").addEventListener("click", function () {
+                var start = ed.head, end = Math.min(ed.seconds, start + 60);
+                var b = { Start: start, End: end };
+                ed.breaks.push(b);
+                changed();
+                select(ed.breaks.indexOf(b));
+            });
+
+            $("#CsdBreaks").addEventListener("click", function (e) {
+                var go = e.target.closest("[data-go]"), del = e.target.closest("[data-del]"), row = e.target.closest("tr[data-i]");
+                if (go) {
+                    select(Number(go.getAttribute("data-go")), true);
+                } else if (del) {
+                    ed.breaks.splice(Number(del.getAttribute("data-del")), 1);
+                    ed.sel = -1;
+                    changed();
+                } else if (row && e.target.tagName !== "INPUT") {
+                    select(Number(row.getAttribute("data-i")));
+                }
+            });
+            $("#CsdBreaks").addEventListener("focusin", function (e) {
+                var row = e.target.closest("tr[data-i]");
+                if (row && Number(row.getAttribute("data-i")) !== ed.sel) {
+                    ed.sel = Number(row.getAttribute("data-i"));
+                    renderTimeline();
+                    Array.prototype.forEach.call($("#CsdBreaks").querySelectorAll("tr"), function (tr) {
+                        tr.classList.toggle("sel", Number(tr.getAttribute("data-i")) === ed.sel);
+                    });
+                }
+            });
+            $("#CsdBreaks").addEventListener("change", function (e) {
+                var input = e.target;
+                var i = Number(input.closest("tr").getAttribute("data-i"));
+                var t = parseClock(input.value);
+                var b = ed.breaks[i];
+                var field = input.getAttribute("data-field");
+                var other = field === "Start" ? b.End : b.Start;
+                if (isNaN(t) || t < 0 || t > ed.seconds || (field === "Start" ? t >= other : t <= other)) {
+                    input.classList.add("bad");
+                    $("#CsdSaveResult").textContent = "Break " + (i + 1) + ": write a time like 12:30.4, within the recording, with the start before the end.";
+                    return;
+                }
+                b[field] = t;
+                changed();
+                ed.sel = ed.breaks.indexOf(b);
+                renderTimeline();
+                renderBreaks();
+            });
+
+            // Timeline: click to move the playhead; drag a break's edge to move it.
+            var drag = null;
+            $("#CsdTimeline").addEventListener("pointerdown", function (e) {
+                if (!ed) {
+                    return;
+                }
+                var line = this.getBoundingClientRect();
+                var at = function (x) { return Math.max(0, Math.min(1, (x - line.left) / line.width)) * ed.seconds; };
+                var edge = e.target.closest("[data-edge]"), block = e.target.closest(".csd-block");
+                if (edge && block) {
+                    var i = Number(block.getAttribute("data-i"));
+                    drag = { b: ed.breaks[i], edge: edge.getAttribute("data-edge"), at: at };
+                    ed.sel = i;
+                    this.setPointerCapture(e.pointerId);
+                    e.preventDefault();
+                    return;
+                }
+                if (block) {
+                    select(Number(block.getAttribute("data-i")));
+                }
+                moveHead(at(e.clientX));
+            });
+            $("#CsdTimeline").addEventListener("pointermove", function (e) {
+                if (!drag) {
+                    return;
+                }
+                var t = drag.at(e.clientX);
+                if (drag.edge === "Start") {
+                    drag.b.Start = Math.min(t, drag.b.End - 1);
+                } else {
+                    drag.b.End = Math.max(t, drag.b.Start + 1);
+                }
+                ed.head = drag.b[drag.edge];
+                $("#CsdTime").textContent = clock(ed.head, true);
+                renderTimeline();
+            });
+            $("#CsdTimeline").addEventListener("pointerup", function () {
+                if (!drag) {
+                    return;
+                }
+                var b = drag.b;
+                drag = null;
+                changed();
+                ed.sel = ed.breaks.indexOf(b);
+                renderTimeline();
+                renderBreaks();
+                frame();
+            });
+
+            $("#CsdDiscard").addEventListener("click", function () { loadDetail(ed.id, true); });
+            $("#CsdSave").addEventListener("click", function () {
+                var btn = this;
+                btn.disabled = true;
+                api("PUT", "ComskipSegments/Dashboard/" + ed.id + "/Breaks", { Breaks: ed.breaks, WriteEdl: $("#CsdWriteEdl").checked }).then(function (r) {
+                    $("#CsdSaveResult").textContent = r.Message;
+                    if (r.Ok) {
+                        loadDetail(ed.id, false);
+                    } else {
+                        btn.disabled = false;
+                    }
+                }, function () {
+                    $("#CsdSaveResult").textContent = "Couldn't save.";
+                    btn.disabled = false;
+                });
+            });
+
+            $("#CsdBack").addEventListener("click", function () {
+                if (ed && ed.dirty && !window.confirm("Leave without saving your changes?")) {
+                    return;
+                }
+                show(false);
+            });
+
+            $("#CsdRescan").addEventListener("click", function () {
+                if (ed.d.Row.Source === "edited" && !window.confirm("Re-running Comskip replaces the breaks you edited. Go ahead?")) {
+                    return;
+                }
+                api("POST", "ComskipSegments/Detect/" + ed.id + "?force=true").then(function (r) {
+                    $("#CsdRescanResult").textContent = r.Message + (r.Queued ? " Come back to this page in a few minutes." : "");
+                }, function () {
+                    $("#CsdRescanResult").textContent = "Couldn't start Comskip.";
+                });
+            });
+
+            // ---- Cut ----
+
+            $("#CsdCutBtn").addEventListener("click", function () {
+                var len = ed.seconds, removed = total(ed.breaks), s = ed.d.Settings;
+                $("#CsdBeforeLen").textContent = clock(len);
+                $("#CsdAfterLen").textContent = clock(len - removed);
+                $("#CsdBeforeBar").innerHTML = bar(ed.breaks, len);
+                $("#CsdAfterBar").style.width = ((len - removed) / len * 100) + "%";
+                $("#CsdCutHow").textContent = "Fast cut: about a minute, no loss of quality. Each cut has to land on a keyframe, so "
+                    + (s.Rounding === "keep-show" ? "a second or so of the show is lost after each break rather than leaving any ad" : "a second or so of each ad is kept rather than losing any show")
+                    + ". " + (s.KeepOriginal ? "The original is kept, hidden beside the recording, so the cut can be undone."
+                        : s.UndoDays > 0 ? "The original is kept for " + s.UndoDays + " days so the cut can be undone." : "The original is not kept: the cut can't be undone.")
+                    + " (Both are set on the Settings page.)";
+                $("#CsdCutGo").textContent = "Cut " + ed.breaks.length + " break" + (ed.breaks.length === 1 ? "" : "s");
+                $("#CsdCutBox").classList.remove("csd-hidden");
+                $("#CsdSaveBox").classList.add("csd-hidden");
+                $("#CsdCutBox").scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+            $("#CsdCutCancel").addEventListener("click", function () {
+                $("#CsdCutBox").classList.add("csd-hidden");
+                $("#CsdSaveBox").classList.remove("csd-hidden");
+            });
+            $("#CsdCutGo").addEventListener("click", function () {
+                var btn = this;
+                btn.disabled = true;
+                api("POST", "ComskipSegments/Dashboard/" + ed.id + "/Cut").then(function (r) {
+                    btn.disabled = false;
+                    $("#CsdCutBox").classList.add("csd-hidden");
+                    if (!r.Ok) {
+                        $("#CsdSaveBox").classList.remove("csd-hidden");
+                        $("#CsdSaveResult").textContent = r.Message;
+                        return;
+                    }
+                    ed.cutting = { Detail: "Starting", DoneBytes: 0, Bytes: 0, Stoppable: true };
+                    renderCutState();
+                    watchCut();
+                }, function () {
+                    btn.disabled = false;
+                    $("#CsdSaveResult").textContent = "Couldn't start the cut.";
+                });
+            });
+
+            function renderCutState() {
+                var box = $("#CsdCutState"), d = ed.d, html = "";
+                if (ed.cutting) {
+                    var j = ed.cutting, pct = j.Bytes > 0 ? Math.round(j.DoneBytes / j.Bytes * 100) : 0;
+                    html = "<h3 style=\"margin-top:0\">Cutting the commercials out</h3>"
+                        + "<div class=\"csd-row\"><strong>" + esc(j.Detail || "Working") + "</strong><span class=\"csd-grow\"></span><span class=\"csd-mono\">" + pct + "%</span></div>"
+                        + "<div class=\"csd-progress\"><div style=\"width:" + pct + "%\"></div></div>"
+                        + "<div class=\"csd-row\"><span class=\"csd-sub csd-grow\">You can leave this page; the cut carries on.</span>"
+                        + (j.Stoppable ? "<button type=\"button\" class=\"csd-btn\" id=\"CsdStop\">Stop, and keep the recording as it was</button>" : "") + "</div>";
+                } else if (d.LastCut && !d.LastCut.Ok) {
+                    html = "<div class=\"csd-error\">" + esc(d.LastCut.Message) + "</div>";
+                } else if (d.Cut) {
+                    html = (d.LastCut && d.LastCut.Ok ? "<div class=\"csd-ok\">" + esc(d.LastCut.Message) + "</div>" : "")
+                        + "<div class=\"csd-row\" style=\"margin-top:10px\"><span class=\"csd-grow\">Commercials cut " + new Date(d.Cut.CutUtc).toLocaleString()
+                        + ": " + d.Cut.Breaks + " break(s), " + clock(d.Cut.SecondsBefore) + " → " + clock(d.Row.Seconds) + ". "
+                        + (d.Cut.CanUndo ? (d.Cut.UndoUntil ? "The original is kept until " + new Date(d.Cut.UndoUntil).toLocaleDateString() + "." : "The original is kept.") : "The original wasn't kept, so it can't be undone.")
+                        + "</span>" + (d.Cut.CanUndo ? "<button type=\"button\" class=\"csd-btn\" id=\"CsdUndo\">Undo cut</button>" : "") + "</div>"
+                        + "<div id=\"CsdUndoResult\" class=\"fieldDescription\"></div>";
+                }
+                box.innerHTML = html;
+                box.classList.toggle("csd-hidden", !html);
+            }
+
+            $("#CsdCutState").addEventListener("click", function (e) {
+                if (e.target.id === "CsdStop") {
+                    e.target.disabled = true;
+                    api("POST", "ComskipSegments/Cuts/" + ed.id + "/Stop").catch(function () {});
+                } else if (e.target.id === "CsdUndo") {
+                    if (!window.confirm("Put the original recording back, with its commercial breaks?")) {
+                        return;
+                    }
+                    e.target.disabled = true;
+                    api("POST", "ComskipSegments/Dashboard/" + ed.id + "/UndoCut").then(function (r) {
+                        if (r.Ok) {
+                            loadDetail(ed.id, true);
+                        } else {
+                            $("#CsdUndoResult").textContent = r.Message;
+                            e.target.disabled = false;
+                        }
+                    });
+                }
+            });
+
+            // Follows this recording's cut in the cut list until it's done, then reloads it.
+            function watchCut() {
+                stopPolling();
+                if (!ed) {
+                    return;
+                }
+                var id = ed.id;
+                var tick = function () {
+                    ApiClient.getJSON(ApiClient.getUrl("ComskipSegments/Cuts")).then(function (jobs) {
+                        if (!ed || ed.id !== id) {
+                            return;
+                        }
+                        var job = (jobs || []).filter(function (j) { return j.ItemId === id; })[0];
+                        if (job && job.Kind === "commercials") {
+                            ed.cutting = job;
+                            renderCutState();
+                            poll = setTimeout(tick, 2000);
+                        } else if (ed.cutting) {
+                            ed.cutting = null;
+                            loadDetail(id, true);
+                        }
+                    });
+                };
+                tick();
+            }
+
+            function stopPolling() {
+                clearTimeout(poll);
+                poll = null;
+            }
+
+            page.addEventListener("pageshow", function () {
+                show(false);
+            });
+            page.addEventListener("pagehide", stopPolling);
+        })();
+    </script>
+</div>
+</body>
+</html>

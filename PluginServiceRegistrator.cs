@@ -36,6 +36,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<AudioTrimService>();
         serviceCollection.AddSingleton<ProgramStart.ProgramStartStore>();
         serviceCollection.AddSingleton<ProgramStart.ProgramStartService>();
+        serviceCollection.AddSingleton<Editing.CommercialCutStore>();
+        serviceCollection.AddSingleton<Editing.CommercialCutService>();
 
         // DetectionManager is both a singleton (so the provider/watcher/task can enqueue
         // into it) AND the hosted service that runs the worker loop. Register the singleton

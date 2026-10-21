@@ -28,7 +28,7 @@ public sealed class CutJob
 
     public string Name { get; init; } = string.Empty;
 
-    /// <summary>"program-start" or "audio-format".</summary>
+    /// <summary>"program-start", "audio-format" or "commercials".</summary>
     public string Kind { get; init; } = string.Empty;
 
     /// <summary>checking (scanning or looking for a card), cutting (ffmpeg writing the trimmed copy), finishing (putting it in place).</summary>
@@ -36,6 +36,9 @@ public sealed class CutJob
 
     /// <summary>Stop is offered while nothing has been touched yet: the original is only replaced while finishing.</summary>
     public bool Stoppable => Phase != PhaseFinishing;
+
+    /// <summary>What it's doing, in words, when there's more than one step ("Copying part 3 of 5").</summary>
+    public string? Detail { get; set; }
 
     public long Bytes { get; set; }
 
@@ -48,6 +51,10 @@ public sealed class CutJob
 
     [JsonIgnore]
     internal string? FinalPath { get; set; }
+
+    // Written by earlier steps of a cut in several steps (the parts before the one being copied).
+    [JsonIgnore]
+    internal long BytesBefore { get; set; }
 
     [JsonIgnore]
     internal CancellationTokenSource Cancel { get; } = new();
@@ -109,7 +116,7 @@ public sealed class CutTracker
         {
             job.DoneBytes = job.Phase switch
             {
-                CutJob.PhaseCutting when job.TempPath is { } t => Size(t),
+                CutJob.PhaseCutting when job.TempPath is { } t => job.BytesBefore + Size(t),
                 CutJob.PhaseFinishing when job.FinalPath is { } f => Size(f),
                 _ => 0
             };

@@ -11,6 +11,7 @@
      data-require="emby-input,emby-button,emby-checkbox">
     <div data-role="content">
         <div class="content-primary">
+            <div class="fieldDescription" style="margin:0.5em 0 1em;">Check, edit or cut out each recording's commercial breaks on the <a is="emby-linkbutton" class="button-link" href="#/configurationpage?name=ComskipSegmentsDashboard">Commercial segments</a> page.</div>
             <form id="ComskipSegmentsConfigForm">
 
                 <div class="verticalSection">
@@ -196,7 +197,16 @@
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="TrimUndoDays">Otherwise, keep it for undo (days)</label>
                         <input id="TrimUndoDays" name="TrimUndoDays" type="number" min="0" max="365" step="1" is="emby-input" />
-                        <div class="fieldDescription">When the box above is off: how long a trim can be undone (a mistaken or curious press) before its original is deleted. 0 deletes it as soon as the trimmed file is in place. Applies to every trim: program start and audio format.</div>
+                        <div class="fieldDescription">When the box above is off: how long a trim can be undone (a mistaken or curious press) before its original is deleted. 0 deletes it as soon as the trimmed file is in place. Applies to every trim: program start, audio format and cutting commercials out.</div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="CutRounding">Cutting commercials out: where each cut lands</label>
+                        <select is="emby-select" id="CutRounding" name="CutRounding" class="emby-select-withcolor emby-select">
+                            <option value="keep-ad">Keep a second or so of the ad, so no show is lost</option>
+                            <option value="keep-show">Lose a second or so of the show, so no ad is left</option>
+                        </select>
+                        <div class="fieldDescription">"Cut commercials out…" on the <a is="emby-linkbutton" class="button-link" href="#/configurationpage?name=ComskipSegmentsDashboard">Commercial segments</a> page copies the video without re-encoding it, so the show can only carry on from a keyframe (every few seconds on broadcast TV) after each break.</div>
                     </div>
 
                     <div class="inputContainer">
@@ -452,6 +462,7 @@
                 page.querySelector("#AudioTrimMinJunkSeconds").value = config.AudioTrimMinJunkSeconds != null ? config.AudioTrimMinJunkSeconds : 5;
                 page.querySelector("#AudioTrimPaddingSeconds").value = config.AudioTrimPaddingSeconds != null ? config.AudioTrimPaddingSeconds : 1.5;
                 page.querySelector("#ProgramStartAction").value = config.ProgramStartAction || "marker";
+                page.querySelector("#CutRounding").value = config.CutRounding || "keep-ad";
                 page.querySelector("#ProgramStartAutomatic").checked = config.ProgramStartAutomatic !== false;
                 page.querySelector("#ProgramStartScanMinutes").value = config.ProgramStartScanMinutes || 10;
                 page.querySelector("#ProgramStartMatchThreshold").value = config.ProgramStartMatchThreshold || 0.7;
@@ -765,6 +776,7 @@
                         var trimPadding = parseFloat(page.querySelector("#AudioTrimPaddingSeconds").value);
                         config.AudioTrimPaddingSeconds = isNaN(trimPadding) ? 1.5 : trimPadding;
                         config.ProgramStartAction = page.querySelector("#ProgramStartAction").value;
+                        config.CutRounding = page.querySelector("#CutRounding").value;
                         config.ProgramStartAutomatic = page.querySelector("#ProgramStartAutomatic").checked;
                         var scanMinutes = parseInt(page.querySelector("#ProgramStartScanMinutes").value, 10);
                         config.ProgramStartScanMinutes = isNaN(scanMinutes) ? 10 : scanMinutes;

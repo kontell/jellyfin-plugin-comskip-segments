@@ -52,5 +52,20 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 "{0}.Configuration.configPage.html",
                 GetType().Namespace)
         };
+
+        // The segments dashboard, in the dashboard's side menu.
+        yield return new PluginPageInfo
+        {
+            Name = DashboardPageName,
+            DisplayName = "Commercial segments",
+            EnableInMainMenu = true,
+            MenuIcon = "content_cut",
+            EmbeddedResourcePath = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}.Configuration.dashboardPage.html",
+                GetType().Namespace)
+        };
     }
+
+    public const string DashboardPageName = "ComskipSegmentsDashboard";
 }
