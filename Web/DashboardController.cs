@@ -9,6 +9,7 @@ using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Jellyfin.Plugin.ComskipSegments.Configuration;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.Editing;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -191,6 +192,59 @@ public sealed class DashboardController : ControllerBase
     [HttpPost("{itemId}/UndoCut")]
     public async Task<ActionResult<EditResult>> UndoCut([FromRoute] Guid itemId) =>
         _libraryManager.GetItemById(itemId) is BaseItem item ? Ok(await _cutter.UndoAsync(item).ConfigureAwait(false)) : NotFound();
+
+    /// <summary>A frame for the editor's frame-by-frame stepping: its time, keyframe or not, a JPEG (base64).</summary>
+    public sealed record FrameDto(double T, bool Key, string Jpeg);
+
+    public sealed record FramesResponse(IReadOnlyList<FrameDto> Frames);
+
+    /// <summary>
+    /// <paramref name="count"/> consecutive frames from <paramref name="seconds"/> on, each with its
+    /// exact time, decoded in one go (the editor steps through them without asking again).
+    /// </summary>
+    [HttpGet("{itemId}/Frames")]
+    public async Task<ActionResult<FramesResponse>> Frames(
+        [FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] int count = 120, [FromQuery] int width = 640, CancellationToken ct = default)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            return NotFound();
+        }
+
+        var encoder = _serviceProvider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>();
+        var frames = await FrameStrip.DecodeAsync(encoder.EncoderPath, encoder.ProbePath, item.Path, Math.Max(0, seconds), count, width, ct).ConfigureAwait(false);
+        return Ok(new FramesResponse(frames.Select(f => new FrameDto(f.T, f.Key, Convert.ToBase64String(f.Jpeg))).ToList()));
+    }
+
+    /// <summary>The nearest run of black frames after (<paramref name="forward"/>) or before <paramref name="seconds"/>, up to 10 minutes away.</summary>
+    [HttpGet("{itemId}/Black")]
+    public async Task<ActionResult<FrameStrip.BlackRun?>> Black([FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] bool forward = true, CancellationToken ct = default)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            return NotFound();
+        }
+
+        var encoder = _serviceProvider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>();
+        // The GPU Jellyfin transcodes with, when it's an Intel/AMD one on VAAPI (QSV sits on VAAPI on Linux).
+        string? gpu = null;
+        try
+        {
+            var enc = _serviceProvider.GetRequiredService<MediaBrowser.Common.Configuration.IConfigurationManager>().GetEncodingOptions();
+            var type = enc.HardwareAccelerationType.ToString();
+            if (OperatingSystem.IsLinux() && (type.Equals("vaapi", StringComparison.OrdinalIgnoreCase) || type.Equals("qsv", StringComparison.OrdinalIgnoreCase)))
+            {
+                gpu = string.IsNullOrWhiteSpace(enc.VaapiDevice) ? "/dev/dri/renderD128" : enc.VaapiDevice;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read Jellyfin's hardware acceleration settings");
+        }
+
+        var run = await FrameStrip.FindBlackAsync(encoder.EncoderPath, encoder.ProbePath, item.Path, seconds, forward, 600, gpu, ct).ConfigureAwait(false);
+        return run is null ? NoContent() : Ok(run);
+    }
 
     private Row RowOf(BaseItem item, bool cut)
     {
