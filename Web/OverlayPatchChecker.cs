@@ -50,7 +50,7 @@ public sealed class OverlayPatchChecker : IHostedService
             _logger.LogWarning(
                 "Comskip web patch is {State} at {Path}, so the web client shows no commercial marks on the seek bar. " +
                 "This is normal after a jellyfin-web upgrade, which replaces index.html. Use Install web overlay on the " +
-                "plugin's settings page{Fix}, or run Web/install-overlay.sh with sudo, then hard-refresh the page.",
+                "plugin's settings page{Fix:l}, or run Web/install-overlay.sh with sudo, then hard-refresh the page.",
                 status.State,
                 status.IndexPath,
                 status.FixCommand is null ? string.Empty : " (Jellyfin can't write the file; first run: " + status.FixCommand + ")");
