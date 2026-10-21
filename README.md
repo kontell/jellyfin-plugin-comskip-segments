@@ -188,10 +188,14 @@ its breaks frame by frame and, if you like, cut them out of the file.
   picture, drag along it to scrub, or open the **Overview** grid of the whole recording
   (one picture per keyframe, made in the background the first time a recording is
   opened, a few seconds per episode, kept in the plugin's folder until the file changes
-  or 30 days unopened). **◀◀ / ▶▶** flip through the overview at 2–16 pictures a second.
+  or 30 days unopened). The row of frames under the picture scrolls: drag it (or its scroll
+  bar) to look along it, click a frame to go there; the frame you're on is outlined in yellow.
+- **Playing:** **Play ▶** and **◀ Reverse** at 1×, 2×, 4×, 8×, 16× or 32× (J/K/L as in
+  editing programs: again = faster; Space plays/stops). Up to 8× shows real frames decoded on
+  the server (on Jellyfin's GPU when it has a VAAPI/QSV one), 16× and 32× the overview's
+  keyframes; sound plays forwards up to 4×.
 - **Stepping:** ←/→ or the mouse wheel step one frame, Shift one second, ↑/↓ (or Ctrl +
   wheel) the previous/next keyframe, `,`/`.` the previous/next black frames.
-  J/K/L rewind/stop/fast forward.
 - **Fixing breaks:** `[` and `]` (or the Start/End buttons) move the edge of the break
   you're in, or mark a new break's start and end anywhere else. Save writes the breaks
   (and the `.edl` beside the recording when that setting is on); only commercial
@@ -202,6 +206,33 @@ its breaks frame by frame and, if you like, cut them out of the file.
   while the recording is still recording or someone is watching it. Resume positions
   and the program start move with the cut, and **Undo cut** puts the original back for
   as long as it's kept (the audio-trim backup settings).
+
+#### Screenshots
+
+The recordings list, each with a bar showing where its breaks are:
+
+![The recordings list](docs/screenshots/recordings-list.jpg)
+
+The editor, inside a break: the picture at the playhead, the row of frames around it (the
+yellow one is where you are; drag the row to look along it), stepping and play controls:
+
+![The editor](docs/screenshots/editor.jpg)
+
+The timeline and the list of breaks, with their exact start and end:
+
+![Timeline and breaks](docs/screenshots/editor-breaks.jpg)
+
+Playing at 2× through the break:
+
+![Playing](docs/screenshots/playing.jpg)
+
+Cutting the commercials out: what it will do, the cut running, and done (with Undo):
+
+![Before cutting](docs/screenshots/cut-confirm.jpg)
+
+![The cut running](docs/screenshots/cut-running.jpg)
+
+![Cut done](docs/screenshots/cut-done.jpg)
 
 ## The one file to watch
 
