@@ -275,6 +275,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Show a done/total summary badge on show and season cards.</summary>
     public bool BadgeShowSummary { get; set; } = true;
 
+    /// <summary>
+    /// Put the web overlay (seek-bar marks, item menu) back into jellyfin-web's index.html on
+    /// startup when it's missing, e.g. after a jellyfin-web upgrade; only where Jellyfin may write the file.
+    /// </summary>
+    public bool AutoInstallWebOverlay { get; set; } = true;
+
     public const string ProgramStartMarker = "marker";
     public const string ProgramStartTrim = "trim";
 

@@ -3,76 +3,57 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ComskipSegments.Web;
 
 /// <summary>
-/// On startup, checks whether jellyfin-web's index.html still has each of this plugin's
-/// web patches applied by Web/install-overlay.sh, and logs a clear warning per patch
-/// that's missing — most commonly because a jellyfin-web package upgrade overwrote
-/// index.html back to stock. The plugin can't reapply the patch itself (index.html is
-/// root-owned; this service runs as the `jellyfin` account), so this is
-/// detection-and-instructions only.
+/// On startup, checks that jellyfin-web's index.html still loads this plugin's browser scripts
+/// (a jellyfin-web upgrade replaces the file and drops them). Where Jellyfin may write the file
+/// and <see cref="Jellyfin.Plugin.ComskipSegments.Configuration.PluginConfiguration.AutoInstallWebOverlay"/> is on, it puts them
+/// back itself; otherwise it logs what to run.
 /// </summary>
 public sealed class OverlayPatchChecker : IHostedService
 {
-    private static readonly (string Marker, string Description)[] Patches =
-    {
-        ("<!-- ComskipSegments:overlay:begin -->", "commercial-marker seek-bar overlay"),
-        ("<!-- ComskipSegments:itemmenu:begin -->", "\"Scan for commercials\" item-details menu entry")
-    };
-
     private readonly ILogger<OverlayPatchChecker> _logger;
-    private readonly IApplicationPaths _applicationPaths;
+    private readonly WebOverlayPatcher _patcher;
 
-    public OverlayPatchChecker(ILogger<OverlayPatchChecker> logger, IApplicationPaths applicationPaths)
+    public OverlayPatchChecker(ILogger<OverlayPatchChecker> logger, WebOverlayPatcher patcher)
     {
         _logger = logger;
-        _applicationPaths = applicationPaths;
+        _patcher = patcher;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var indexPath = Path.Combine(_applicationPaths.WebPath, "index.html");
-            if (!File.Exists(indexPath))
+            var status = _patcher.Status();
+            switch (status.State)
             {
-                _logger.LogDebug("Comskip web patch check: {Path} not found, skipping", indexPath);
-                return Task.CompletedTask;
-            }
-
-            var html = File.ReadAllText(indexPath);
-            var missing = Patches.Where(p => !html.Contains(p.Marker, StringComparison.Ordinal)).ToList();
-
-            if (missing.Count == 0)
-            {
-                if (html.Contains("\"/ComskipSegments/web/", StringComparison.Ordinal))
-                {
-                    _logger.LogWarning(
-                        "Comskip web patch in {Path} is from an older version that loads from the site root, " +
-                        "which doesn't work behind a Base URL. Re-run Web/install-overlay.sh with sudo to update it.",
-                        indexPath);
+                case "nofile":
+                    _logger.LogDebug("Comskip web patch check: {Path} not found, skipping", status.IndexPath);
                     return Task.CompletedTask;
-                }
+                case "installed":
+                    _logger.LogInformation("Comskip web patches present in {Path}", status.IndexPath);
+                    return Task.CompletedTask;
+            }
 
-                _logger.LogInformation("Comskip web patches present in {Path}", indexPath);
+            if (status.CanWrite && Plugin.Instance?.Configuration.AutoInstallWebOverlay != false)
+            {
+                var result = _patcher.Install();
+                _logger.LogInformation("Comskip web overlay was {State} in {Path}: {Message}", status.State, status.IndexPath, result.Message);
                 return Task.CompletedTask;
             }
 
-            foreach (var (_, description) in missing)
-            {
-                _logger.LogWarning(
-                    "Comskip web patch is missing at {Path}: {Description}. This is expected right " +
-                    "after installing/updating this feature, and normal again after any jellyfin-web " +
-                    "package upgrade, which overwrites index.html. Run the plugin's " +
-                    "Web/install-overlay.sh with sudo to (re)install it, then hard-refresh the page.",
-                    indexPath,
-                    description);
-            }
+            _logger.LogWarning(
+                "Comskip web patch is {State} at {Path}, so the web client shows no commercial marks on the seek bar. " +
+                "This is normal after a jellyfin-web upgrade, which replaces index.html. Use Install web overlay on the " +
+                "plugin's settings page{Fix}, or run Web/install-overlay.sh with sudo, then hard-refresh the page.",
+                status.State,
+                status.IndexPath,
+                status.FixCommand is null ? string.Empty : " (Jellyfin can't write the file; first run: " + status.FixCommand + ")");
         }
         catch (Exception ex)
         {

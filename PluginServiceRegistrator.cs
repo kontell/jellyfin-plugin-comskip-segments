@@ -23,6 +23,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<LiveRecordingChannelPoller>();
         serviceCollection.AddSingleton<ComskipRunner>();
         serviceCollection.AddSingleton<ComskipInstaller>();
+        serviceCollection.AddSingleton<Web.WebOverlayPatcher>();
         serviceCollection.AddSingleton<LiveScanCoordinator>();
         serviceCollection.AddHostedService<LiveScanStarter>();
 

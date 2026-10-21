@@ -89,10 +89,17 @@ Elsewhere (Windows, other processors), or to use your own Comskip, set the paths
 ### Browser overlay & item-menu buttons (optional, separate step)
 
 The seek-bar commercial-marker overlay and the two item-details `...` menu entries
-("Scan for commercials" and "Fix opening/closing audio format") are **not** wired up
-just by installing the plugin DLL above — they're browser-side scripts that have to be
-loaded by jellyfin-web's `index.html`, which the plugin can't patch itself (that file is
-root-owned; the plugin runs as the `jellyfin` service account):
+("Scan for commercials" and "Fix opening/closing audio format") are browser-side scripts
+that jellyfin-web's `index.html` has to load. Jellyfin's own skip prompt works without them.
+
+**Easiest:** Dashboard → Plugins → **Comskip Commercial Segments** → **Web overlay** →
+**Install web overlay**. That works wherever Jellyfin may write `index.html` (Docker and
+Windows usually). On a Linux package install the file belongs to root: the page then shows
+a one-time `chown` to run (on Docker, inside the container), after which the button works. With
+"Put it back by itself on startup" on (the default), the plugin re-adds it after a jellyfin-web
+update wherever it may write the file.
+
+**Or** run the script with sudo:
 
 ```
 sudo Web/install-overlay.sh

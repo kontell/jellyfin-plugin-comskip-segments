@@ -50,6 +50,20 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h2>Web overlay</h2>
+                    <div id="WebOverlayStatus" class="fieldDescription" style="font-size:1.05em;margin-bottom:0.6em;">Checking the web client...</div>
+                    <button id="InstallWebOverlayBtn" type="button" is="emby-button" class="raised block" style="display:none;">
+                        <span id="InstallWebOverlayLabel">Install web overlay</span>
+                    </button>
+                    <div id="InstallWebOverlayResult" class="fieldDescription" style="margin-top:0.5em;white-space:pre-line;user-select:text;"></div>
+                    <div class="fieldDescription">The commercial marks on the web player's seek bar and the item menu's commercial entries come from scripts that jellyfin-web's index.html has to load. Jellyfin's own skip prompt works without them.</div>
+                    <label class="checkboxContainer">
+                        <input id="AutoInstallWebOverlay" name="AutoInstallWebOverlay" type="checkbox" is="emby-checkbox" />
+                        <span>Put it back by itself on startup when a Jellyfin update removes it (where Jellyfin may change the file)</span>
+                    </label>
+                </div>
+
+                <div class="verticalSection">
                     <h2>DVR recordings</h2>
 
                     <div class="inputContainer">
@@ -428,6 +442,7 @@
                 page.querySelector("#BadgeGuideStyle").value = config.BadgeGuideStyle || "letters";
                 page.querySelector("#BadgeScanningMotion").value = config.BadgeScanningMotion || "pulse";
                 page.querySelector("#BadgeShowSummary").checked = config.BadgeShowSummary !== false;
+                page.querySelector("#AutoInstallWebOverlay").checked = config.AutoInstallWebOverlay !== false;
                 page.querySelector("#EnableAudioFormatTrim").checked = !!config.EnableAudioFormatTrim;
                 page.querySelector("#AudioTrimAutomaticApply").checked = !!config.AudioTrimAutomaticApply;
                 page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal !== false;
@@ -482,8 +497,47 @@
                 });
             }
 
+            // Web overlay: whether index.html loads it, and the button when it doesn't (or is outdated).
+            function showWebOverlay(page) {
+                var status = page.querySelector("#WebOverlayStatus");
+                var btn = page.querySelector("#InstallWebOverlayBtn");
+                ApiClient.ajax({ type: "GET", url: ApiClient.getUrl("ComskipSegments/WebOverlay"), dataType: "json" }).then(function (r) {
+                    var text = {
+                        installed: "\u2713 Installed in " + r.IndexPath + ".",
+                        missing: "Not installed: the web player shows no commercial marks.",
+                        outdated: "An older version is installed (it doesn't work behind a Base URL).",
+                        nofile: "Jellyfin's web page wasn't found on this server, so there's nothing to patch."
+                    }[r.State] || r.State;
+                    if (r.State !== "installed" && r.State !== "nofile" && !r.CanWrite && r.FixCommand) {
+                        text += "\nJellyfin isn't allowed to change " + r.IndexPath + ". Run this once on the server, then press the button:\n" + r.FixCommand;
+                    }
+                    status.textContent = text;
+                    status.style.whiteSpace = "pre-line";
+                    btn.style.display = r.State === "installed" || r.State === "nofile" ? "none" : "";
+                    page.querySelector("#InstallWebOverlayLabel").textContent = r.State === "outdated" ? "Update web overlay" : "Install web overlay";
+                }).catch(function () {
+                    status.textContent = "Couldn't check the web overlay.";
+                });
+            }
+
+            document.querySelector("#InstallWebOverlayBtn").addEventListener("click", function () {
+                var page = document.querySelector("#ComskipSegmentsConfigPage");
+                var out = page.querySelector("#InstallWebOverlayResult");
+                var btn = this;
+                btn.disabled = true;
+                ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("ComskipSegments/WebOverlay/Install"), dataType: "json" }).then(function (r) {
+                    out.textContent = r.Message;
+                    btn.disabled = false;
+                    showWebOverlay(page);
+                }).catch(function () {
+                    btn.disabled = false;
+                    out.textContent = "Installing the web overlay failed (the server didn't answer).";
+                });
+            });
+
             document.querySelector("#ComskipSegmentsConfigPage").addEventListener("pageshow", function () {
                 showComskipInfo(this);
+                showWebOverlay(this);
             });
 
             document.querySelector("#InstallComskipBtn").addEventListener("click", function () {
@@ -695,6 +749,7 @@
                         config.BadgeGuideStyle = page.querySelector("#BadgeGuideStyle").value;
                         config.BadgeScanningMotion = page.querySelector("#BadgeScanningMotion").value;
                         config.BadgeShowSummary = page.querySelector("#BadgeShowSummary").checked;
+                        config.AutoInstallWebOverlay = page.querySelector("#AutoInstallWebOverlay").checked;
                         config.EnableAudioFormatTrim = page.querySelector("#EnableAudioFormatTrim").checked;
                         config.AudioTrimAutomaticApply = page.querySelector("#AudioTrimAutomaticApply").checked;
                         config.AudioTrimKeepOriginal = page.querySelector("#AudioTrimKeepOriginal").checked;

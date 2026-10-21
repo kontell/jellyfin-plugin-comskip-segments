@@ -36,6 +36,7 @@ public sealed class ComskipSegmentsController : ControllerBase
     private readonly DetectionStore _store;
     private readonly IServiceProvider _serviceProvider;
     private readonly Comskip.ComskipInstaller _installer;
+    private readonly WebOverlayPatcher _overlay;
 
     public ComskipSegmentsController(
         ILogger<ComskipSegmentsController> logger,
@@ -43,9 +44,11 @@ public sealed class ComskipSegmentsController : ControllerBase
         DetectionManager manager,
         DetectionStore store,
         IServiceProvider serviceProvider,
-        Comskip.ComskipInstaller installer)
+        Comskip.ComskipInstaller installer,
+        WebOverlayPatcher overlay)
     {
         _installer = installer;
+        _overlay = overlay;
         _logger = logger;
         _libraryManager = libraryManager;
         _manager = manager;
@@ -85,6 +88,16 @@ public sealed class ComskipSegmentsController : ControllerBase
     [Authorize(Policy = Policies.RequiresElevation)]
     public async Task<ActionResult<Comskip.ComskipInstaller.InstallResult>> InstallComskip(CancellationToken cancellationToken) =>
         Ok(await _installer.InstallAsync(Plugin.Instance!.Configuration, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Whether jellyfin-web's index.html loads the web overlay, and whether Jellyfin may change it.</summary>
+    [HttpGet("WebOverlay")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult<WebOverlayPatcher.OverlayStatus> WebOverlay() => Ok(_overlay.Status());
+
+    /// <summary>The settings page's Install web overlay: patches index.html where Jellyfin may, else says what to run.</summary>
+    [HttpPost("WebOverlay/Install")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult<WebOverlayPatcher.PatchResult> InstallWebOverlay() => Ok(_overlay.Install());
 
     /// <summary>
     /// Force a (re)run of detection for one item, bypassing the show/channel allow- and
