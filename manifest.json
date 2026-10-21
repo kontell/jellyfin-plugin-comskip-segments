@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/mackandall/jellyfin-plugin-comskip-segments/main/icon.png",
     "versions": [
       {
+        "version": "1.2.0.2",
+        "changelog": "Web overlay works behind a Base URL; Install web overlay button and status on the settings page (shows the one-time permission command when Jellyfin can't change index.html); the overlay is put back automatically after a jellyfin-web update when Jellyfin may write the file. Press Update web overlay or re-run Web/install-overlay.sh once.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/mackandall/jellyfin-plugin-comskip-segments/releases/download/v1.2.0.2/jellyfin-plugin-comskip-segments_1.2.0.2.zip",
+        "checksum": "f0b822ac21f0be96a6751465b712e635",
+        "timestamp": "2026-10-21T03:07:00.0000000Z"
+      },
+      {
         "version": "1.2.0.1",
         "changelog": "Fix: Jellyfin could crash while Comskip ran (its output and error output were written into one buffer from two threads at once). Same fix for live scans and audio trims.",
         "targetAbi": "12.0.0.0",
