@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +16,7 @@ using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -202,9 +204,14 @@ public sealed class DashboardController : ControllerBase
     /// <paramref name="count"/> consecutive frames from <paramref name="seconds"/> on, each with its
     /// exact time, decoded in one go (the editor steps through them without asking again).
     /// </summary>
+    /// <remarks>
+    /// For playing: <paramref name="every"/> takes only every so many frames, and <paramref name="gpu"/>
+    /// decodes on Jellyfin's GPU when it has one (stepping keeps the CPU, which is exact on dark fades).
+    /// </remarks>
     [HttpGet("{itemId}/Frames")]
     public async Task<ActionResult<FramesResponse>> Frames(
-        [FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] int count = 120, [FromQuery] int width = 640, CancellationToken ct = default)
+        [FromRoute] Guid itemId, [FromQuery] double seconds, [FromQuery] int count = 120, [FromQuery] int width = 640,
+        [FromQuery] int every = 1, [FromQuery] bool gpu = false, CancellationToken ct = default)
     {
         if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
         {
@@ -212,7 +219,8 @@ public sealed class DashboardController : ControllerBase
         }
 
         var encoder = _serviceProvider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>();
-        var frames = await FrameStrip.DecodeAsync(encoder.EncoderPath, encoder.ProbePath, item.Path, Math.Max(0, seconds), count, width, ct).ConfigureAwait(false);
+        var frames = await FrameStrip.DecodeAsync(
+            encoder.EncoderPath, encoder.ProbePath, item.Path, Math.Max(0, seconds), count, width, ct, Math.Clamp(every, 1, 64), gpu ? GpuDevice() : null).ConfigureAwait(false);
         return Ok(new FramesResponse(frames.Select(f => new FrameDto(f.T, f.Key, Convert.ToBase64String(f.Jpeg))).ToList()));
     }
 
@@ -244,15 +252,80 @@ public sealed class DashboardController : ControllerBase
         }
 
         var encoder = _serviceProvider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>();
-        // The GPU Jellyfin transcodes with, when it's an Intel/AMD one on VAAPI (QSV sits on VAAPI on Linux).
-        string? gpu = null;
+        var run = await FrameStrip.FindBlackAsync(encoder.EncoderPath, encoder.ProbePath, item.Path, seconds, forward, 600, GpuDevice(), ct).ConfigureAwait(false);
+        return run is null ? NoContent() : Ok(run);
+    }
+
+    /// <summary>
+    /// The recording's sound from <paramref name="seconds"/> on, as MP3 made while it's sent, for
+    /// the editor's Play (an audio element plays it and keeps the pictures in time with it).
+    /// </summary>
+    [HttpGet("{itemId}/Audio")]
+    public async Task Audio([FromRoute] Guid itemId, [FromQuery] double seconds)
+    {
+        if (_libraryManager.GetItemById(itemId) is not BaseItem item || item.Path is null || !System.IO.File.Exists(item.Path))
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        var encoder = _serviceProvider.GetRequiredService<MediaBrowser.Controller.MediaEncoding.IMediaEncoder>();
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = encoder.EncoderPath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var a in new[]
+        {
+            "-hide_banner", "-nostdin", "-loglevel", "error",
+            "-ss", Math.Max(0, seconds).ToString("F3", System.Globalization.CultureInfo.InvariantCulture), "-i", item.Path,
+            "-map", "0:a:0", "-vn", "-sn", "-dn", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "160k", "-f", "mp3", "pipe:1"
+        })
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        var ct = HttpContext.RequestAborted;
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process is null)
+        {
+            Response.StatusCode = StatusCodes.Status500InternalServerError;
+            return;
+        }
+
+        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        Response.ContentType = "audio/mpeg";
+        Response.Headers.CacheControl = "no-store";
+        try
+        {
+            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException)
+        {
+            // The editor stopped playing.
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+        }
+    }
+
+    // The GPU Jellyfin transcodes with, when it's an Intel/AMD one on VAAPI (QSV sits on VAAPI on Linux).
+    private string? GpuDevice()
+    {
         try
         {
             var enc = _serviceProvider.GetRequiredService<MediaBrowser.Common.Configuration.IConfigurationManager>().GetEncodingOptions();
             var type = enc.HardwareAccelerationType.ToString();
             if (OperatingSystem.IsLinux() && (type.Equals("vaapi", StringComparison.OrdinalIgnoreCase) || type.Equals("qsv", StringComparison.OrdinalIgnoreCase)))
             {
-                gpu = string.IsNullOrWhiteSpace(enc.VaapiDevice) ? "/dev/dri/renderD128" : enc.VaapiDevice;
+                return string.IsNullOrWhiteSpace(enc.VaapiDevice) ? "/dev/dri/renderD128" : enc.VaapiDevice;
             }
         }
         catch (Exception ex)
@@ -260,8 +333,7 @@ public sealed class DashboardController : ControllerBase
             _logger.LogDebug(ex, "Could not read Jellyfin's hardware acceleration settings");
         }
 
-        var run = await FrameStrip.FindBlackAsync(encoder.EncoderPath, encoder.ProbePath, item.Path, seconds, forward, 600, gpu, ct).ConfigureAwait(false);
-        return run is null ? NoContent() : Ok(run);
+        return null;
     }
 
     private Row RowOf(BaseItem item, bool cut)

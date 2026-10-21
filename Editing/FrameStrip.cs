@@ -23,14 +23,34 @@ public sealed record StripFrame(double T, bool Key, byte[] Jpeg);
 /// </summary>
 public static partial class FrameStrip
 {
+    /// <remarks>
+    /// <paramref name="every"/>: only every so many frames (for playing faster than normal: fewer
+    /// pictures, the same stretch of time). <paramref name="vaapiDevice"/>: decode on that GPU,
+    /// several times faster than the CPU; null, or when it fails, the CPU decodes.
+    /// </remarks>
     public static async Task<IReadOnlyList<StripFrame>> DecodeAsync(
-        string ffmpegPath, string ffprobePath, string path, double from, int count, int width, CancellationToken ct)
+        string ffmpegPath, string ffprobePath, string path, double from, int count, int width, CancellationToken ct, int every = 1, string? vaapiDevice = null)
     {
         var (start, _) = await AudioChannelScanner.ProbeFormatTimes(ffprobePath, path, ct).ConfigureAwait(false);
         var keys = await Keyframes.AroundAsync(ffprobePath, path, from + 3, 12, ct).ConfigureAwait(false);
         var keyBefore = keys.Where(k => k <= from + 0.002).Cast<double?>().LastOrDefault();
         var seek = Math.Max(0, (keyBefore ?? from - 10) - 0.5);
 
+        if (vaapiDevice is not null)
+        {
+            var onGpu = await RunDecodeAsync(ffmpegPath, path, start, seek, from, keys, count, width, every, vaapiDevice, ct).ConfigureAwait(false);
+            if (onGpu.Count > 0)
+            {
+                return onGpu;
+            }
+        }
+
+        return await RunDecodeAsync(ffmpegPath, path, start, seek, from, keys, count, width, every, null, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyList<StripFrame>> RunDecodeAsync(
+        string ffmpegPath, string path, double start, double seek, double from, IReadOnlyList<double> keys, int count, int width, int every, string? vaapiDevice, CancellationToken ct)
+    {
         var psi = new ProcessStartInfo
         {
             FileName = ffmpegPath,
@@ -40,15 +60,26 @@ public static partial class FrameStrip
             CreateNoWindow = true
         };
         var fromAbs = (start + from - 0.0005).ToString("F4", CultureInfo.InvariantCulture);
-        foreach (var a in new[]
+        width = Math.Clamp(width, 120, 1280);
+        var pick = $"select='gte(t\\,{fromAbs})'" + (every > 1 ? $",select='not(mod(n\\,{every}))'" : string.Empty);
+        var args = new List<string> { "-hide_banner", "-nostdin" };
+        if (vaapiDevice is not null)
         {
-            "-hide_banner", "-nostdin", "-copyts",
+            args.AddRange(new[] { "-hwaccel", "vaapi", "-hwaccel_device", vaapiDevice, "-hwaccel_output_format", "vaapi" });
+        }
+
+        args.AddRange(new[]
+        {
+            "-copyts",
             "-ss", seek.ToString("F3", CultureInfo.InvariantCulture), "-i", path,
             "-map", "0:v:0", "-an", "-sn", "-dn",
-            "-vf", $"select='gte(t\\,{fromAbs})',showinfo,scale={Math.Clamp(width, 120, 1280)}:-2",
+            "-vf", vaapiDevice is not null
+                ? $"{pick},scale_vaapi=w={width}:h=-2:format=nv12,hwdownload,format=nv12,showinfo"
+                : $"{pick},showinfo,scale={width}:-2",
             "-fps_mode", "passthrough", "-frames:v", Math.Clamp(count, 1, 300).ToString(CultureInfo.InvariantCulture),
             "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"
-        })
+        });
+        foreach (var a in args)
         {
             psi.ArgumentList.Add(a);
         }

@@ -49,13 +49,24 @@
         #ComskipDashboardPage .csd-frame .csd-time { position: absolute; left: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #fff; }
         #ComskipDashboardPage .csd-frame:focus-visible { outline: 2px solid #00a4dc; outline-offset: 2px; }
         #ComskipDashboardPage .csd-frame .csd-loading { position: absolute; right: 10px; top: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.85em; }
-        #ComskipDashboardPage .csd-strip { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
-        #ComskipDashboardPage .csd-strip button { padding: 0; border: 2px solid transparent; border-radius: 4px; background: #000; cursor: pointer; position: relative; aspect-ratio: 16 / 9; overflow: hidden; }
-        #ComskipDashboardPage .csd-strip button img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        #ComskipDashboardPage .csd-strip button.cur { border-color: #fff; }
+        #ComskipDashboardPage .csd-stripbox { position: relative; margin-top: 6px; }
+        #ComskipDashboardPage .csd-strip { overflow-x: auto; overflow-y: hidden; cursor: grab; user-select: none; touch-action: pan-y; scrollbar-width: auto; scrollbar-color: #00a4dc rgba(255,255,255,0.12); }
+        #ComskipDashboardPage .csd-strip::-webkit-scrollbar { height: 14px; }
+        #ComskipDashboardPage .csd-strip::-webkit-scrollbar-track { background: rgba(255,255,255,0.12); border-radius: 7px; }
+        #ComskipDashboardPage .csd-strip::-webkit-scrollbar-thumb { background: #00a4dc; border-radius: 7px; border: 3px solid transparent; background-clip: padding-box; }
+        #ComskipDashboardPage .csd-strip.drag { cursor: grabbing; }
+        #ComskipDashboardPage .csd-strip-in { position: relative; }
+        #ComskipDashboardPage .csd-strip button { position: absolute; top: 7px; padding: 0; border: 2px solid transparent; border-radius: 4px; background: #000; cursor: inherit; overflow: hidden; }
+        #ComskipDashboardPage .csd-strip button img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; -webkit-user-drag: none; }
         #ComskipDashboardPage .csd-strip button.key::after { content: "K"; position: absolute; left: 2px; top: 1px; font-size: 10px; font-weight: 700; color: #fff; background: #00a4dc; padding: 0 3px; border-radius: 2px; }
         #ComskipDashboardPage .csd-strip button.brk { box-shadow: inset 0 -4px 0 #e53935; }
-        #ComskipDashboardPage .csd-strip button.empty { visibility: hidden; }
+        #ComskipDashboardPage .csd-strip button.cur { border: 4px solid #ffd60a; box-shadow: 0 0 0 2px #000, 0 0 14px 4px rgba(255,214,10,0.85); z-index: 1; }
+        #ComskipDashboardPage .csd-strip button.cur.brk { box-shadow: inset 0 -4px 0 #e53935, 0 0 0 2px #000, 0 0 14px 4px rgba(255,214,10,0.85); }
+        #ComskipDashboardPage .csd-strip button span { display: none; }
+        #ComskipDashboardPage .csd-strip button.cur span { display: block; position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); padding: 0 5px; border-radius: 3px; background: #ffd60a; color: #1a1206; font-size: 11px; font-weight: 700; white-space: nowrap; }
+        #ComskipDashboardPage .csd-strip-cur { position: absolute; top: 50%; transform: translateY(-60%); z-index: 2; padding: 6px 10px; border: 0; border-radius: 6px; background: #ffd60a; color: #1a1206; font-weight: 700; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+        #ComskipDashboardPage .csd-strip-cur.l { left: 4px; }
+        #ComskipDashboardPage .csd-strip-cur.r { right: 4px; }
         #ComskipDashboardPage .csd-tlbox { position: relative; }
         #ComskipDashboardPage .csd-hover { position: absolute; bottom: 64px; width: 200px; margin-left: -100px; background: #000; border: 2px solid #fff; border-radius: 6px; overflow: hidden; pointer-events: none; z-index: 2; }
         #ComskipDashboardPage .csd-hover img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; }
@@ -135,7 +146,11 @@
                             <span class="csd-where csd-hidden" id="CsdWhere"></span>
                             <span class="csd-loading csd-hidden" id="CsdLoading">Loading frames…</span>
                         </div>
-                        <div class="csd-strip" id="CsdStrip" aria-label="Frames around the playhead"></div>
+                        <div class="csd-stripbox">
+                            <div class="csd-strip" id="CsdStrip" aria-label="Frames around the playhead: drag them or the scroll bar to look along, click one to go there"><div class="csd-strip-in" id="CsdStripIn"></div></div>
+                            <button type="button" class="csd-strip-cur l csd-hidden" id="CsdStripBack"></button>
+                            <button type="button" class="csd-strip-cur r csd-hidden" id="CsdStripAhead"></button>
+                        </div>
                         <div class="csd-row" style="margin-top: 10px;">
                             <button type="button" class="csd-btn" data-nav="-10s" title="Back 10 seconds">−10 s</button>
                             <button type="button" class="csd-btn" data-nav="black-" title="Previous black frames (,)">‹ Black</button>
@@ -149,15 +164,18 @@
                             <button type="button" class="csd-btn" data-nav="+10s" title="Forward 10 seconds">+10 s</button>
                         </div>
                         <div class="csd-row" style="margin-top: 8px;">
-                            <button type="button" class="csd-btn" id="CsdRew" aria-pressed="false" title="Rewind through the keyframes (J); again to stop">◀◀ Rewind</button>
-                            <button type="button" class="csd-btn" id="CsdFwd" aria-pressed="false" title="Fast forward through the keyframes (L); again to stop">Fast forward ▶▶</button>
+                            <button type="button" class="csd-btn" id="CsdRew" aria-pressed="false" title="Play backwards (J; again: faster)">◀ Reverse</button>
+                            <button type="button" class="csd-btn" id="CsdFwd" aria-pressed="false" title="Play (L or Space; L again: faster)">Play ▶</button>
                             <label class="csd-sub" for="CsdSpeed">Speed</label>
                             <select id="CsdSpeed" style="min-height: 40px; background: rgba(0,0,0,0.3); color: inherit; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 0 8px;">
-                                <option value="2">2 pictures a second</option>
-                                <option value="4" selected>4 pictures a second</option>
-                                <option value="8">8 pictures a second</option>
-                                <option value="16">16 pictures a second</option>
+                                <option value="1" selected>1×</option>
+                                <option value="2">2×</option>
+                                <option value="4">4×</option>
+                                <option value="8">8×</option>
+                                <option value="16">16×</option>
+                                <option value="32">32×</option>
                             </select>
+                            <label class="csd-sub" style="display: inline-flex; align-items: center; gap: 4px;"><input type="checkbox" id="CsdSound" checked /> Sound</label>
                             <span class="csd-sub" id="CsdPlayInfo"></span>
                             <span class="csd-grow"></span>
                             <button type="button" class="csd-btn" id="CsdGridBtn" aria-pressed="false">Overview</button>
@@ -168,7 +186,7 @@
                             <button type="button" class="csd-btn" id="CsdSetStart" title="[">Break starts here</button>
                             <button type="button" class="csd-btn" id="CsdSetEnd" title="]">Break ends here</button>
                         </div>
-                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end, J K L rewind / stop / fast forward (again: faster).</div>
+                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Drag the frames below the picture (or their scroll bar) to look along them without moving; the frame you're on has a yellow frame, and a yellow button brings you back to it. Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end, Space play / stop, J K L reverse / stop / play (again: faster: 1×, 2×, 4×, 8×, 16×, 32×). Sound plays forward up to 4×; 16× and 32× show a picture at every keyframe.</div>
                         <div class="fieldDescription">To mark a new break, press <b>Break starts here</b> where it starts (it lights up), go to where it ends and press <b>Break ends here</b>; either order works, and pressing the lit button again cancels. Inside a break, the buttons move that break's start or end. A new break that overlaps others joins them.</div>
                     </div>
                     <div class="csd-side csd-panel" style="margin: 0;">
@@ -419,7 +437,9 @@
                 $("#CsdCutBox").classList.add("csd-hidden");
                 $("#CsdImg").removeAttribute("src");
                 $("#CsdImg").alt = "";
-                $("#CsdStrip").innerHTML = "";
+                $("#CsdStripIn").innerHTML = "";
+                strip.pool = [];
+                strip.browsing = false;
                 $("#CsdBlack").textContent = "";
                 cache = { id: id, list: [], loading: null, pending: 0 };
                 stopPlay(true);
@@ -580,6 +600,12 @@
                     if (cache.id !== id) {
                         return;
                     }
+                    // The row of frames stays where it is (whatever comes in before it), and while it's being
+                    // looked along, the frames kept are the ones around what's in view, not the playhead.
+                    var el = $("#CsdStrip"), stride = strip.cellW + STRIP_GAP, old = cache.list;
+                    var ai = old.length && strip.cellW > 0 ? Math.min(old.length - 1, Math.floor(el.scrollLeft / stride)) : -1;
+                    var anchor = ai >= 0 ? { T: old[ai].T, off: el.scrollLeft - ai * stride } : null;
+                    var centerT = strip.browsing && ai >= 0 ? old[Math.min(old.length - 1, Math.floor((el.scrollLeft + el.clientWidth / 2) / stride))].T : ed.head;
                     var seen = {};
                     cache.list.forEach(function (f) { seen[f.T.toFixed(3)] = true; });
                     (r.Frames || []).forEach(function (f) {
@@ -589,9 +615,11 @@
                     });
                     cache.list.sort(function (x, y) { return x.T - y.T; });
                     if (cache.list.length > KEEP && ed) {
-                        // Keep the frames nearest the playhead.
-                        var at = Math.max(0, indexAt(ed.head)), from = Math.max(0, Math.min(at - KEEP / 2, cache.list.length - KEEP));
+                        var at = Math.max(0, indexAt(centerT)), from = Math.max(0, Math.min(at - KEEP / 2, cache.list.length - KEEP));
                         cache.list = cache.list.slice(from, from + KEEP);
+                    }
+                    if (ed) {
+                        renderStrip(false, anchor);
                     }
                 }).catch(function () {}).then(function () {
                     if (cache.id === id) {
@@ -634,7 +662,7 @@
                     return;
                 }
                 var l = cache.list, i = indexAt(ed.head);
-                if (i < 0 || l.length === 0) {
+                if (i < 0 || !covers(ed.head)) {
                     var n0 = cache.pending;
                     cache.pending = 0;
                     goTo(ed.head + n0 / 30);
@@ -717,7 +745,7 @@
                 clearTimeout(frameTimer);
                 if (i >= 0 && covers(ed.head)) {
                     setPicture(l[i].src, "The picture at " + clock(ed.head, true));
-                    renderStrip(i);
+                    renderStrip(true);
                     // Load on ahead (or back) before the steps get there.
                     if (!cache.loading && i > l.length - 40 && l[l.length - 1].T < ed.seconds - 0.05) {
                         loadFrames(l[l.length - 1].T + 0.001);
@@ -726,7 +754,7 @@
                     }
                     return;
                 }
-                Array.prototype.forEach.call($("#CsdStrip").children, function (b) { b.className = "empty"; });
+                renderStrip(false);
                 var id = ed.id, at = ed.head;
                 frameTimer = setTimeout(function () {
                     fetch(ApiClient.getUrl("ComskipSegments/ProgramStart/" + id + "/Frame", { seconds: at.toFixed(3), width: 960 }), {
@@ -760,33 +788,198 @@
                 });
             }
 
-            // The strip keeps its 11 pictures and only changes what they show (rebuilding them flashed black).
-            function renderStrip(i) {
-                var strip = $("#CsdStrip"), l = cache.list;
-                if (strip.children.length !== 11) {
-                    var html = "";
-                    for (var n = 0; n < 11; n++) {
-                        html += '<button type="button" class="empty"><img alt="" /></button>';
+            // ---- The row of frames below the picture ----
+            // Every frame in hand side by side, in a row that scrolls: drag the frames or the scroll bar
+            // to look along them without moving the playhead, click one to go there. Only the pictures
+            // in view exist, and each keeps its element (rebuilding them flashed black). The frame at
+            // the playhead has a yellow frame; when it's out of view, a yellow button brings it back.
+            var STRIP_N = 11, STRIP_GAP = 4;
+            var strip = { pool: [], autoLeft: -1, browsing: false, cellW: 0 };
+
+            function stripStride() {
+                var el = $("#CsdStrip");
+                strip.cellW = Math.max(40, (el.clientWidth - (STRIP_N - 1) * STRIP_GAP) / STRIP_N);
+                return strip.cellW + STRIP_GAP;
+            }
+
+            // Scrolls the row from here (not the person looking along it).
+            function setStripLeft(x) {
+                var el = $("#CsdStrip");
+                x = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, Math.round(x)));
+                strip.autoLeft = x;
+                el.scrollLeft = x;
+            }
+
+            // follow: the playhead moved, put its frame in the middle. anchor: frames came in, keep the
+            // same frames in view. Otherwise the row stays where it is.
+            function renderStrip(follow, anchor) {
+                var el = $("#CsdStrip"), inner = $("#CsdStripIn"), l = cache.list, stride = stripStride();
+                var h = Math.round(strip.cellW * 9 / 16);
+                inner.style.width = Math.max(0, l.length * stride - STRIP_GAP) + "px";
+                inner.style.height = (h + 14) + "px";
+                var cur = covers(ed.head) ? indexAt(ed.head) : -1;
+                if (follow && cur >= 0) {
+                    cancelAnimationFrame(glideRaf);
+                    strip.browsing = false;
+                    setStripLeft(cur * stride + strip.cellW / 2 - el.clientWidth / 2);
+                } else if (anchor) {
+                    var ai = indexAt(anchor.T);
+                    if (ai >= 0) {
+                        setStripLeft(ai * stride + anchor.off);
                     }
-                    strip.innerHTML = html;
                 }
-                for (var j = i - 5, n2 = 0; j <= i + 5; j++, n2++) {
-                    var btn = strip.children[n2], f = l[j];
-                    if (!f) {
-                        btn.className = "empty";
-                        btn.removeAttribute("data-goto");
-                        continue;
-                    }
+                var left = el.scrollLeft, width = el.clientWidth;
+                var first = Math.max(0, Math.floor(left / stride) - 2), last = Math.min(l.length - 1, Math.ceil((left + width) / stride) + 2);
+                while (strip.pool.length < last - first + 1) {
+                    var nb = document.createElement("button");
+                    nb.type = "button";
+                    nb.innerHTML = '<img alt="" draggable="false"><span></span>';
+                    inner.appendChild(nb);
+                    strip.pool.push(nb);
+                }
+                var used = [];
+                for (var j = first; j <= last; j++) {
+                    var k = j % strip.pool.length, btn = strip.pool[k], f = l[j];
+                    used[k] = true;
                     var inBreak = ed.breaks.some(function (b) { return f.T >= b.Start && f.T < b.End; });
-                    btn.className = (j === i ? "cur " : "") + (f.Key ? "key " : "") + (inBreak ? "brk" : "");
+                    btn.className = (j === cur ? "cur " : "") + (f.Key ? "key " : "") + (inBreak ? "brk" : "");
+                    btn.style.left = (j * stride) + "px";
+                    btn.style.width = strip.cellW + "px";
+                    btn.style.height = h + "px";
                     btn.setAttribute("data-goto", f.T);
                     btn.title = clock(f.T, true) + (f.Key ? " (keyframe)" : "");
                     var im = btn.firstChild;
                     if (im.getAttribute("src") !== f.src) {
                         im.src = f.src;
                     }
+                    btn.lastChild.textContent = j === cur ? clock(f.T, true) : "";
+                }
+                strip.pool.forEach(function (b, n) { b.style.display = used[n] ? "" : "none"; });
+
+                // Where the playhead's frame is, when it's out of view.
+                var back = $("#CsdStripBack"), ahead = $("#CsdStripAhead"), side = 0;
+                if (l.length) {
+                    if (cur >= 0) {
+                        side = cur * stride + strip.cellW <= left + 1 ? -1 : cur * stride >= left + width - 1 ? 1 : 0;
+                    } else {
+                        side = ed.head < l[0].T ? -1 : 1;
+                    }
+                }
+                back.classList.toggle("csd-hidden", side !== -1);
+                ahead.classList.toggle("csd-hidden", side !== 1);
+                back.textContent = "◀ You're at " + clock(ed.head, true);
+                ahead.textContent = "You're at " + clock(ed.head, true) + " ▶";
+            }
+
+            function stripHome() {
+                if (covers(ed.head)) {
+                    renderStrip(true);
+                } else {
+                    goTo(ed.head);
                 }
             }
+            $("#CsdStripBack").addEventListener("click", stripHome);
+            $("#CsdStripAhead").addEventListener("click", stripHome);
+
+            $("#CsdStrip").addEventListener("scroll", function () {
+                if (!ed) {
+                    return;
+                }
+                if (Math.abs(this.scrollLeft - strip.autoLeft) > 1) {
+                    strip.browsing = true;
+                    strip.autoLeft = -1;
+                }
+                renderStrip(false);
+                // Near either end of the frames in hand: the next ones load.
+                var l = cache.list, stride = strip.cellW + STRIP_GAP;
+                if (!strip.browsing || !l.length || cache.loading) {
+                    return;
+                }
+                var first = Math.floor(this.scrollLeft / stride), last = Math.ceil((this.scrollLeft + this.clientWidth) / stride);
+                if (first < 20 && l[0].T > 0.001) {
+                    loadFrames(backFrom());
+                } else if (last > l.length - 20 && l[l.length - 1].T < ed.seconds - 0.05) {
+                    loadFrames(l[l.length - 1].T + 0.001);
+                }
+            });
+
+            // Press on the frames and drag them sideways; let go while moving and they glide on.
+            var sdrag = null, stripNoClick = false, glideRaf = 0;
+            $("#CsdStrip").addEventListener("pointerdown", function (e) {
+                // Below the pictures is the scroll bar, which works by itself.
+                if (!ed || e.button !== 0 || e.clientY > this.getBoundingClientRect().top + this.clientHeight) {
+                    return;
+                }
+                cancelAnimationFrame(glideRaf);
+                sdrag = { id: e.pointerId, x: e.clientX, left: this.scrollLeft, moved: false, lastX: e.clientX, lastT: performance.now(), v: 0 };
+            });
+            $("#CsdStrip").addEventListener("pointermove", function (e) {
+                if (!sdrag || e.pointerId !== sdrag.id) {
+                    return;
+                }
+                var dx = e.clientX - sdrag.x;
+                if (!sdrag.moved && Math.abs(dx) < 5) {
+                    return;
+                }
+                if (!sdrag.moved) {
+                    sdrag.moved = true;
+                    this.setPointerCapture(e.pointerId);
+                    this.classList.add("drag");
+                }
+                var now = performance.now(), dt = now - sdrag.lastT;
+                if (dt > 0) {
+                    sdrag.v = 0.8 * ((e.clientX - sdrag.lastX) / dt) + 0.2 * sdrag.v;
+                }
+                sdrag.lastX = e.clientX;
+                sdrag.lastT = now;
+                this.scrollLeft = sdrag.left - dx;
+            });
+            function endStripDrag(e) {
+                if (!sdrag || e.pointerId !== sdrag.id) {
+                    return;
+                }
+                var d = sdrag;
+                sdrag = null;
+                this.classList.remove("drag");
+                if (d.moved) {
+                    // A drag isn't a click on the frame it ended on.
+                    stripNoClick = true;
+                    setTimeout(function () { stripNoClick = false; }, 0);
+                    if (performance.now() - d.lastT < 80) {
+                        glide(d.v);
+                    }
+                }
+            }
+            $("#CsdStrip").addEventListener("pointerup", endStripDrag);
+            $("#CsdStrip").addEventListener("pointercancel", endStripDrag);
+            $("#CsdStrip").addEventListener("click", function (e) {
+                if (stripNoClick) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                }
+            }, true);
+
+            // v: pixels a millisecond, slowing down.
+            function glide(v) {
+                var el = $("#CsdStrip"), last = performance.now();
+                cancelAnimationFrame(glideRaf);
+                function step(now) {
+                    var dt = now - last;
+                    last = now;
+                    el.scrollLeft -= v * dt;
+                    v *= Math.pow(0.995, dt);
+                    if (Math.abs(v) > 0.02) {
+                        glideRaf = requestAnimationFrame(step);
+                    }
+                }
+                glideRaf = requestAnimationFrame(step);
+            }
+
+            window.addEventListener("resize", function () {
+                if (ed && !$("#CsdEditor").classList.contains("csd-hidden")) {
+                    renderStrip(!strip.browsing);
+                }
+            });
 
             // ---- Overview: a picture at every keyframe of the whole recording ----
             var ov = { id: null, list: [], done: false, timer: null };
@@ -901,47 +1094,223 @@
                 return t;
             }
 
-            // ---- Fast forward and rewind: flips through the overview's pictures ----
+            // ---- Play, forwards or backwards, 1× to 32× ----
+            // 1× to 8×: real frames, decoded on the server a few seconds ahead, about 30 pictures a second
+            // (faster speeds skip the frames in between). 16× and 32×: the overview's keyframes. With
+            // sound (forwards, up to 4×) the sound is the clock and the pictures keep time with it; when
+            // the pictures run short, both wait for the next ones.
+            var PLAY_N = 60;
             var play = null;
+
+            // Frames a second, from the frames in hand (the shortest step between two of them).
+            function frameRate() {
+                var l = cache.list, dt = Infinity;
+                for (var n = 1; n < l.length && n < 60; n++) {
+                    var d = l[n].T - l[n - 1].T;
+                    if (d > 0.004 && d < dt) {
+                        dt = d;
+                    }
+                }
+                if (dt !== Infinity) {
+                    ed.fps = 1 / dt;
+                }
+                return ed.fps || 30;
+            }
+
             function startPlay(dir) {
                 if (play && play.dir === dir) {
                     stopPlay();
                     return;
                 }
                 stopPlay(true);
-                if (ov.list.length === 0) {
-                    $("#CsdPlayInfo").textContent = "The overview isn't ready yet.";
+                cancelAnimationFrame(glideRaf);
+                var speed = Number($("#CsdSpeed").value);
+                play = {
+                    id: ed.id, dir: dir, speed: speed, keys: speed >= 16 && ov.list.length > 0, fps: frameRate(),
+                    t: ed.head, wall: performance.now(), waiting: true, audio: null, aT0: 0,
+                    buf: [], lo: ed.head, hi: ed.head, atEnd: false, loading: false, gen: 0, shown: -1
+                };
+                ["#CsdFwd", "#CsdRew"].forEach(function (sel) {
+                    var on = (sel === "#CsdFwd") === (dir > 0);
+                    $(sel).classList.toggle("lit", on);
+                    $(sel).setAttribute("aria-pressed", String(on));
+                    $(sel).textContent = on ? "❚❚ Stop" : sel === "#CsdFwd" ? "Play ▶" : "◀ Reverse";
+                });
+                syncAudio();
+                play.raf = requestAnimationFrame(tickPlay);
+            }
+
+            // Where the playhead is now.
+            function playT() {
+                var p = play;
+                if (p.audio) {
+                    return p.aT0 + p.audio.currentTime;
+                }
+                return p.waiting ? p.t : p.t + (performance.now() - p.wall) / 1000 * p.speed * p.dir;
+            }
+
+            // A new speed from the menu (or J/L again), carrying on from here.
+            function setSpeed() {
+                var p = play;
+                if (!p) {
                     return;
                 }
-                play = { dir: dir, i: Math.max(0, ovAt(ed.head)) };
-                var btn = dir > 0 ? $("#CsdFwd") : $("#CsdRew");
-                btn.classList.add("lit");
-                btn.setAttribute("aria-pressed", "true");
-                tickPlay();
+                p.t = playT();
+                p.wall = performance.now();
+                p.speed = Number($("#CsdSpeed").value);
+                p.keys = p.speed >= 16 && ov.list.length > 0;
+                syncAudio();
+            }
+
+            // Sound forwards up to 4× (faster, it's only noise) when Sound is ticked.
+            function syncAudio() {
+                var p = play, want = $("#CsdSound").checked && p.dir > 0 && p.speed <= 4;
+                if (want && !p.audio) {
+                    var t = playT();
+                    var a = new Audio(ApiClient.getUrl("ComskipSegments/Dashboard/" + p.id + "/Audio", { seconds: t.toFixed(3), ApiKey: ApiClient.accessToken() }));
+                    a.preservesPitch = true;
+                    a.playbackRate = p.speed;
+                    a.addEventListener("error", function () {
+                        if (play === p && p.audio === a) {
+                            dropAudio();
+                            p.noSound = true;
+                        }
+                    });
+                    p.t = t;
+                    p.aT0 = t;
+                    p.audio = a;
+                    if (!p.waiting) {
+                        a.play().catch(function () {});
+                    }
+                } else if (!want && p.audio) {
+                    dropAudio();
+                } else if (p.audio) {
+                    p.audio.playbackRate = p.speed;
+                }
+            }
+
+            function dropAudio() {
+                var p = play, a = p.audio;
+                p.t = p.aT0 + a.currentTime;
+                p.wall = performance.now();
+                p.audio = null;
+                a.pause();
+                a.removeAttribute("src");
+                a.load();
+            }
+
+            // The last picture in hand at or before t.
+            function bufAt(t) {
+                var l = play.buf, lo = 0, hi = l.length - 1, found = -1;
+                while (lo <= hi) {
+                    var mid = (lo + hi) >> 1;
+                    if (l[mid].T <= t + 0.0005) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+                }
+                return found;
+            }
+
+            // Asks for the next pictures when fewer than 3 seconds' worth are left ahead.
+            function fillPlay(t) {
+                var p = play;
+                if (p.buf.length && (t < p.lo - 0.5 || t > p.hi + 0.5)) {
+                    // Somewhere else now (after 16× or 32×): start again from here.
+                    p.buf = [];
+                    p.lo = p.hi = t;
+                    p.atEnd = false;
+                    p.loading = false;
+                    p.gen++;
+                }
+                if (p.loading || (p.dir > 0 ? p.atEnd : p.lo <= 0.001 && p.buf.length)) {
+                    return;
+                }
+                if (p.buf.length && (p.dir > 0 ? p.hi - t : t - p.lo) >= p.speed * 3) {
+                    return;
+                }
+                var every = Math.max(1, Math.round(p.fps * p.speed / 30)), span = PLAY_N * every / p.fps;
+                var from = p.dir > 0 ? (p.buf.length ? p.hi : t) : Math.max(0, (p.buf.length ? p.lo : t) - span);
+                var gen = p.gen;
+                p.loading = true;
+                api("GET", "ComskipSegments/Dashboard/" + p.id + "/Frames?seconds=" + from.toFixed(3) + "&count=" + PLAY_N + "&width=640&every=" + every + "&gpu=true").then(function (r) {
+                    if (play !== p || p.gen !== gen) {
+                        return;
+                    }
+                    var got = r.Frames || [], seen = {};
+                    p.buf.forEach(function (f) { seen[f.T.toFixed(3)] = true; });
+                    got.forEach(function (f) {
+                        if (!seen[f.T.toFixed(3)]) {
+                            p.buf.push({ T: f.T, src: "data:image/jpeg;base64," + f.Jpeg });
+                        }
+                    });
+                    p.buf.sort(function (x, y) { return x.T - y.T; });
+                    // Only what's ahead, and a little behind.
+                    var keep = 6 * PLAY_N;
+                    if (p.buf.length > keep) {
+                        p.buf = p.dir > 0 ? p.buf.slice(p.buf.length - keep) : p.buf.slice(0, keep);
+                    }
+                    if (p.buf.length) {
+                        p.lo = Math.min(p.buf[0].T, p.dir < 0 ? from : p.buf[0].T);
+                        p.hi = Math.max(p.hi, got.length ? got[got.length - 1].T + every / p.fps : p.hi);
+                    }
+                    if (p.dir > 0 && got.length < PLAY_N) {
+                        p.atEnd = true;
+                    }
+                    if (p.dir < 0 && (got.length === 0 || from <= 0.001)) {
+                        p.lo = Math.min(p.lo, from);
+                    }
+                }).catch(function () {}).then(function () {
+                    if (play === p && p.gen === gen) {
+                        p.loading = false;
+                    }
+                });
             }
 
             function tickPlay() {
-                if (!play || !ed) {
+                var p = play;
+                if (!p || !ed || ed.id !== p.id) {
                     return;
                 }
-                var speed = Number($("#CsdSpeed").value), next = play.i + play.dir;
-                if (next < 0 || next >= ov.list.length) {
+                p.raf = requestAnimationFrame(tickPlay);
+                var t = Math.max(0, Math.min(ed.seconds, playT()));
+                if (!p.keys) {
+                    fillPlay(t);
+                }
+                // Past the pictures in hand: wait for the next ones (the sound waits too).
+                var ready = p.keys || (p.buf.length > 0 && (p.dir > 0 ? t < p.hi || p.atEnd : t >= p.lo || p.lo <= 0.001));
+                if (!ready && !p.waiting) {
+                    p.t = t;
+                    p.waiting = true;
+                    if (p.audio) {
+                        p.audio.pause();
+                    }
+                } else if (ready && p.waiting) {
+                    p.waiting = false;
+                    p.wall = performance.now();
+                    if (p.audio) {
+                        p.audio.play().catch(function () {});
+                    }
+                }
+                $("#CsdPlayInfo").textContent = (p.waiting ? "Loading… " : "")
+                    + (p.dir > 0 ? "Playing " : "Playing backwards ") + p.speed + "×"
+                    + (p.keys ? " (keyframes)" : p.audio ? " with sound" : p.noSound ? " (no sound)" : "");
+                if ((p.dir > 0 && t >= ed.seconds - 0.001) || (p.dir < 0 && t <= 0)) {
                     stopPlay();
                     return;
                 }
-                play.i = next;
-                var f = ov.list[next];
+                var list = p.keys ? ov.list : p.buf, i = p.keys ? ovAt(t) : bufAt(t);
+                if (i < 0 || list[i].T === p.shown) {
+                    return;
+                }
+                var f = list[i];
+                p.shown = f.T;
                 ed.head = f.T;
-                setPicture(f.src, "The picture at " + clock(f.T));
+                setPicture(f.src, "The picture at " + clock(f.T, true));
                 $("#CsdTime").textContent = clock(f.T, true);
-                var gap = ov.list.length > 1 ? (ov.list[ov.list.length - 1].T - ov.list[0].T) / (ov.list.length - 1) : 4;
-                $("#CsdPlayInfo").textContent = "about " + Math.round(speed * gap) + "× normal speed";
                 var inside = ed.breaks.filter(function (b) { return f.T >= b.Start && f.T < b.End; })[0];
                 $("#CsdWhere").classList.toggle("csd-hidden", !inside);
                 $("#CsdWhere").textContent = inside ? "In break " + (ed.breaks.indexOf(inside) + 1) : "";
                 renderTimeline();
+                renderStrip(covers(f.T));
                 markGridCurrent();
-                play.timer = setTimeout(tickPlay, 1000 / speed);
             }
 
             // Stops, and loads the frames where it stopped (unless something else moves the playhead next).
@@ -949,12 +1318,17 @@
                 if (!play) {
                     return;
                 }
-                clearTimeout(play.timer);
+                cancelAnimationFrame(play.raf);
+                if (play.audio) {
+                    dropAudio();
+                }
                 play = null;
                 ["#CsdFwd", "#CsdRew"].forEach(function (sel) {
                     $(sel).classList.remove("lit");
                     $(sel).setAttribute("aria-pressed", "false");
                 });
+                $("#CsdFwd").textContent = "Play ▶";
+                $("#CsdRew").textContent = "◀ Reverse";
                 $("#CsdPlayInfo").textContent = "";
                 if (!quiet && ed) {
                     goTo(ed.head);
@@ -963,6 +1337,13 @@
 
             $("#CsdFwd").addEventListener("click", function () { startPlay(1); });
             $("#CsdRew").addEventListener("click", function () { startPlay(-1); });
+            $("#CsdSpeed").addEventListener("change", setSpeed);
+            $("#CsdSound").addEventListener("change", function () {
+                if (play) {
+                    play.noSound = false;
+                    syncAudio();
+                }
+            });
 
             // The old name, used by the rest of the page.
             function frame() {
@@ -1021,6 +1402,10 @@
                 if (!ed) {
                     return;
                 }
+                if (e.currentTarget.id === "CsdStrip" && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+                    // A sideways swipe scrolls the row of frames.
+                    return;
+                }
                 e.preventDefault();
                 var d = e.deltaY || e.deltaX;
                 if (e.deltaMode === 1) {
@@ -1074,16 +1459,25 @@
                     setEdge("End");
                     flash($("#CsdSetEnd"));
                 } else if (e.key === "l" || e.key === "j") {
+                    // As in editing programs: starts at 1×, again in the same direction doubles the speed.
                     var dir = e.key === "l" ? 1 : -1, sp = $("#CsdSpeed");
                     if (play && play.dir === dir) {
-                        // Again in the same direction: faster.
                         sp.selectedIndex = Math.min(sp.options.length - 1, sp.selectedIndex + 1);
+                        setSpeed();
                     } else {
+                        sp.selectedIndex = 0;
                         startPlay(dir);
                     }
                     flash(dir > 0 ? $("#CsdFwd") : $("#CsdRew"));
-                } else if (e.key === "k" || (e.key === " " && play)) {
+                } else if (e.key === "k") {
                     stopPlay();
+                } else if (e.key === " ") {
+                    if (play) {
+                        stopPlay();
+                    } else {
+                        startPlay(1);
+                    }
+                    flash($("#CsdFwd"));
                 } else if (e.key === "Escape" && ed.mark) {
                     ed.mark = null;
                     $("#CsdSaveResult").textContent = "Mark cancelled.";
