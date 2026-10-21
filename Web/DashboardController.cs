@@ -103,7 +103,14 @@ public sealed class DashboardController : ControllerBase
         Cut? Cut,
         CutResult? LastCut,
         string? CutRefusal,
-        CutSettings Settings);
+        CutSettings Settings,
+        IReadOnlyList<Join>? Joins = null);
+
+    /// <summary>
+    /// Where a cut recording's kept parts meet, in seconds of the cut file, and how much was
+    /// taken out there (also at the very start and end, when something was taken there).
+    /// </summary>
+    public sealed record Join(double At, double Removed);
 
     public sealed record OtherSegment(string Type, double Start, double End);
 
@@ -173,7 +180,36 @@ public sealed class DashboardController : ControllerBase
             cut,
             _cutter.LastResult(itemId),
             _cutter.Refusal(item),
-            new CutSettings(cfg.CutRounding, cfg.AudioTrimKeepOriginal, cfg.AudioTrimKeepOriginal ? 0 : Math.Max(0, cfg.TrimUndoDays), cfg.PlaceEdlBesideRecording)));
+            new CutSettings(cfg.CutRounding, cfg.AudioTrimKeepOriginal, cfg.AudioTrimKeepOriginal ? 0 : Math.Max(0, cfg.TrimUndoDays), cfg.PlaceEdlBesideRecording),
+            hasCut ? JoinsOf(cutRecord) : null));
+    }
+
+    private static List<Join> JoinsOf(CommercialCutRecord record)
+    {
+        var joins = new List<Join>();
+        var parts = record.Parts;
+        if (parts.Count == 0)
+        {
+            return joins;
+        }
+
+        if (parts[0].Start > 0.5)
+        {
+            joins.Add(new Join(0, parts[0].Start));
+        }
+
+        var at = 0.0;
+        for (var i = 0; i < parts.Count; i++)
+        {
+            at += parts[i].End - parts[i].Start;
+            var next = i + 1 < parts.Count ? parts[i + 1].Start : record.SecondsBefore;
+            if (next - parts[i].End > 0.5)
+            {
+                joins.Add(new Join(at, next - parts[i].End));
+            }
+        }
+
+        return joins;
     }
 
     /// <summary>Saves the breaks as edited (empty: no commercials).</summary>

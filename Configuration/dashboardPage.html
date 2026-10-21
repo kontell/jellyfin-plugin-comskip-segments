@@ -44,6 +44,11 @@
         #ComskipDashboardPage .csd-preview { flex: 999 1 480px; min-width: 0; }
         #ComskipDashboardPage .csd-side { flex: 1 1 260px; min-width: 0; }
         #ComskipDashboardPage .csd-frame { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+        #ComskipDashboardPage .csd-frame { margin: 0 auto; }
+        #ComskipDashboardPage .csd-grip { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 0 50%, rgba(255,255,255,0.55) 50% 58%, transparent 58% 68%, rgba(255,255,255,0.55) 68% 76%, transparent 76%); }
+        #ComskipDashboardPage .csd-join { position: absolute; top: -8px; bottom: -8px; width: 3px; margin-left: -1px; background: #4caf50; pointer-events: none; }
+        #ComskipDashboardPage .csd-join span { position: absolute; top: -16px; left: 4px; font-size: 0.75em; color: #a5d6a7; white-space: nowrap; }
+        #ComskipDashboardPage details.csd-tips summary { cursor: pointer; margin-top: 10px; opacity: 0.8; }
         #ComskipDashboardPage .csd-frame img { width: 100%; height: 100%; object-fit: contain; }
         #ComskipDashboardPage .csd-frame img:not([src]) { visibility: hidden; }
         #ComskipDashboardPage .csd-frame .csd-time { position: absolute; left: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #fff; }
@@ -135,6 +140,15 @@
                 <div class="csd-row" style="margin: 0.8em 0 0.3em;">
                     <h3 id="CsdTitle" style="margin: 0;"></h3>
                     <span id="CsdBadges" class="csd-row"></span>
+                    <span class="csd-grow"></span>
+                    <label class="csd-sub" for="CsdSize">Picture</label>
+                    <select id="CsdSize" style="min-height: 36px; background: rgba(0,0,0,0.3); color: inherit; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 0 8px;">
+                        <option value="fit">Fit the window</option>
+                        <option value="small">Small</option>
+                        <option value="medium">Medium</option>
+                        <option value="large">Large</option>
+                        <option value="custom" hidden>Your size</option>
+                    </select>
                 </div>
                 <div id="CsdMeta" class="csd-sub"></div>
 
@@ -145,6 +159,7 @@
                             <span class="csd-time csd-mono" id="CsdTime"></span>
                             <span class="csd-where csd-hidden" id="CsdWhere"></span>
                             <span class="csd-loading csd-hidden" id="CsdLoading">Loading frames…</span>
+                            <span class="csd-grip" id="CsdGrip" title="Drag to make the picture bigger or smaller"></span>
                         </div>
                         <div class="csd-stripbox">
                             <div class="csd-strip" id="CsdStrip" aria-label="Frames around the playhead: drag them or the scroll bar to look along, click one to go there"><div class="csd-strip-in" id="CsdStripIn"></div></div>
@@ -182,12 +197,28 @@
                             <span class="csd-sub" id="CsdOvStatus"></span>
                         </div>
                         <div class="csd-row" style="margin-top: 8px;">
+                            <span id="CsdJoins" class="csd-row csd-hidden">
+                                <button type="button" class="csd-btn" id="CsdJoinPrev" title="A few seconds before the previous join">‹ Join</button>
+                                <button type="button" class="csd-btn" id="CsdJoinNext" title="A few seconds before the next join">Join ›</button>
+                                <span class="csd-sub" id="CsdJoinInfo"></span>
+                            </span>
                             <span id="CsdBlack" class="csd-sub csd-grow"></span>
                             <button type="button" class="csd-btn" id="CsdSetStart" title="[">Break starts here</button>
                             <button type="button" class="csd-btn" id="CsdSetEnd" title="]">Break ends here</button>
                         </div>
-                        <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Drag the frames below the picture (or their scroll bar) to look along them without moving; the frame you're on has a yellow frame, and a yellow button brings you back to it. Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end, Space play / stop, J K L reverse / stop / play (again: faster: 1×, 2×, 4×, 8×, 16×, 32×). Sound plays forward up to 4×; 16× and 32× show a picture at every keyframe.</div>
-                        <div class="fieldDescription">To mark a new break, press <b>Break starts here</b> where it starts (it lights up), go to where it ends and press <b>Break ends here</b>; either order works, and pressing the lit button again cancels. Inside a break, the buttons move that break's start or end. A new break that overlaps others joins them.</div>
+                        <div style="margin-top: 4px;">
+                            <div class="csd-ticks" id="CsdTicks"></div>
+                            <div class="csd-tlbox">
+                                <div class="csd-hover csd-hidden" id="CsdHover"><img alt="" /><span></span></div>
+                                <div class="csd-timeline" id="CsdTimeline" aria-label="Timeline: click or drag to move the playhead, drag a break's edges"></div>
+                            </div>
+                        </div>
+                        <details class="csd-tips">
+                            <summary>Keys and tips</summary>
+                            <div class="fieldDescription">Scroll over the picture, the frames or the timeline to step one frame (Shift: a second, Ctrl: a keyframe). Drag the frames below the picture (or their scroll bar) to look along them without moving; the frame you're on has a yellow frame, and a yellow button brings you back to it. Keys: ← → frame, Shift+← → second, ↑ ↓ keyframe, , . black, [ ] break start and end, Space play / stop, J K L reverse / stop / play (again: faster: 1×, 2×, 4×, 8×, 16×, 32×). Sound plays forward up to 4×; 16× and 32× show a picture at every keyframe.</div>
+                            <div class="fieldDescription">To mark a new break, press <b>Break starts here</b> where it starts (it lights up), go to where it ends and press <b>Break ends here</b>; either order works, and pressing the lit button again cancels. Inside a break, the buttons move that break's start or end. A new break that overlaps others joins them.</div>
+                            <div class="fieldDescription">Point at the timeline to see the picture there; click, or drag along it to scrub. Drag a break's edges to move its start or end. Blue along the top: other segments (intros, a program-start preview), not edited here. On a cut recording, green marks are where the cut joined the parts it kept. Picture (top right) sets the picture's size, or drag its bottom-right corner; Fit the window keeps the controls and the timeline in view.</div>
+                        </details>
                     </div>
                     <div class="csd-side csd-panel" style="margin: 0;">
                         <div id="CsdInfo"></div>
@@ -202,15 +233,6 @@
                 <div class="csd-panel csd-hidden" id="CsdGridBox">
                     <div class="csd-row"><h3 style="margin: 0;">Overview</h3><span class="csd-sub">A picture at every keyframe; red underline: in a break. Click one to go there.</span></div>
                     <div class="csd-grid" id="CsdGrid"></div>
-                </div>
-
-                <div class="csd-panel">
-                    <div class="csd-ticks" id="CsdTicks"></div>
-                    <div class="csd-tlbox">
-                        <div class="csd-hover csd-hidden" id="CsdHover"><img alt="" /><span></span></div>
-                        <div class="csd-timeline" id="CsdTimeline" aria-label="Timeline: click or drag to move the playhead, drag a break's edges"></div>
-                    </div>
-                    <div class="fieldDescription" style="margin-top: 10px;">Point at the timeline to see the picture there; click, or drag along it to scrub. Drag a break's edges to move its start or end. Blue along the top: other segments (intros, a program-start preview), not edited here.</div>
                 </div>
 
                 <div class="csd-panel">
@@ -542,9 +564,11 @@
                 $("#CsdCutBtn").disabled = ed.dirty || ed.breaks.length === 0 || !!d.CutRefusal;
                 $("#CsdCutBtn").title = ed.dirty ? "Save your changes first" : (d.CutRefusal || "");
 
+                $("#CsdJoins").classList.toggle("csd-hidden", !cut || !(d.Joins || []).length);
                 renderTimeline();
                 renderBreaks();
                 renderCutState();
+                sizePicture();
             }
 
             function renderTimeline() {
@@ -562,7 +586,11 @@
                         + (ed.d.Row.Status === "cut" ? "" : '<i class="l" data-edge="Start"></i><i class="r" data-edge="End"></i>') + "</div>";
                 }).join("") + (ed.mark ? '<div class="csd-pending" style="left:' + (Math.min(ed.mark.t, ed.head) / len * 100) + "%;width:" + (Math.abs(ed.head - ed.mark.t) / len * 100) + '%"></div>'
                     + '<div class="csd-mark" style="left:' + (ed.mark.t / len * 100) + '%"></div>' : "")
+                    + (ed.d.Joins || []).map(function (j) {
+                        return '<div class="csd-join" style="left:' + (j.At / len * 100) + '%" title="Joined here: ' + clock(j.Removed) + ' taken out"></div>';
+                    }).join("")
                     + '<div class="csd-head" style="left:' + (ed.head / len * 100) + '%"></div>';
+                renderJoinInfo();
             }
 
             function renderBreaks() {
@@ -1781,6 +1809,118 @@
                     $("#CsdRescanResult").textContent = "Couldn't start Comskip.";
                 });
             });
+
+            // ---- Joins: where a cut recording's kept parts meet ----
+            // The only places a cut can go wrong (a second of show lost, or of ad kept), so each has a
+            // green mark on the timeline, and ‹ Join / Join › land a few seconds before one to play through it.
+            var JOIN_LEAD = 5;
+
+            function joinAt(dir) {
+                var joins = ed.d.Joins || [], h = ed.head;
+                if (dir > 0) {
+                    return joins.filter(function (j) { return Math.max(0, j.At - JOIN_LEAD) > h + 0.5; })[0];
+                }
+                return joins.filter(function (j) { return Math.max(0, j.At - JOIN_LEAD) < h - 0.5; }).pop();
+            }
+
+            function renderJoinInfo() {
+                var joins = ed.d.Joins || [];
+                if (!joins.length) {
+                    return;
+                }
+                // The join just ahead of the playhead (or the one it just passed, within a few seconds).
+                var i = joins.findIndex(function (j) { return j.At >= ed.head - JOIN_LEAD; });
+                var j = joins[i];
+                $("#CsdJoinInfo").textContent = j
+                    ? "Join " + (i + 1) + " of " + joins.length + " at " + clock(j.At) + ": " + clock(j.Removed) + " taken out" + (j.At === 0 ? " at the start" : j.At >= ed.seconds - 1 ? " at the end" : "")
+                    : joins.length + " join" + (joins.length === 1 ? "" : "s") + ", all before here";
+                $("#CsdJoinPrev").disabled = !joinAt(-1);
+                $("#CsdJoinNext").disabled = !joinAt(1);
+            }
+
+            function goJoin(dir) {
+                var j = joinAt(dir);
+                if (j) {
+                    stopPlay(true);
+                    goTo(Math.max(0, j.At - JOIN_LEAD));
+                }
+            }
+            $("#CsdJoinPrev").addEventListener("click", function () { goJoin(-1); });
+            $("#CsdJoinNext").addEventListener("click", function () { goJoin(1); });
+
+            // ---- The picture's size ----
+            // Fit the window (the default): as big as leaves the frames, the controls and the timeline in
+            // view below it. Or small, medium, large, or what the bottom-right corner was dragged to.
+            // Remembered in this browser.
+            var SIZES = { small: 480, medium: 720 };
+            var picSize = { mode: "fit", w: 0 };
+            try {
+                picSize = JSON.parse(localStorage.getItem("csd.pictureSize")) || picSize;
+            } catch (e) {
+            }
+            $("#CsdSize").value = picSize.mode;
+
+            function savePicSize() {
+                try {
+                    localStorage.setItem("csd.pictureSize", JSON.stringify(picSize));
+                } catch (e) {
+                }
+            }
+
+            function sizePicture() {
+                var fr = $("#CsdFrame");
+                if (!ed || $("#CsdEditor").classList.contains("csd-hidden")) {
+                    return;
+                }
+                var col = fr.parentNode.clientWidth, w = col;
+                if (picSize.mode === "fit") {
+                    // The row of frames at its height already, before its frames come in.
+                    stripStride();
+                    $("#CsdStripIn").style.height = (Math.round(strip.cellW * 9 / 16) + 14) + "px";
+                    var box = fr.getBoundingClientRect(), scroller = document.scrollingElement || document.documentElement;
+                    var top = box.top + scroller.scrollTop, below = $("#CsdTimeline").getBoundingClientRect().bottom - box.bottom;
+                    w = (window.innerHeight - top - below - 16) * 16 / 9;
+                } else if (picSize.mode === "custom") {
+                    w = picSize.w;
+                } else if (SIZES[picSize.mode]) {
+                    w = SIZES[picSize.mode];
+                }
+                fr.style.width = Math.round(Math.max(240, Math.min(col, w))) + "px";
+            }
+
+            $("#CsdSize").addEventListener("change", function () {
+                picSize = { mode: this.value, w: picSize.w };
+                savePicSize();
+                sizePicture();
+            });
+            window.addEventListener("resize", sizePicture);
+
+            // The corner: the picture stays centred, so it grows by twice the drag.
+            var grip = null;
+            $("#CsdGrip").addEventListener("pointerdown", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                grip = { id: e.pointerId, x: e.clientX, w: $("#CsdFrame").getBoundingClientRect().width };
+                this.setPointerCapture(e.pointerId);
+            });
+            $("#CsdGrip").addEventListener("pointermove", function (e) {
+                if (!grip || e.pointerId !== grip.id) {
+                    return;
+                }
+                picSize = { mode: "custom", w: grip.w + 2 * (e.clientX - grip.x) };
+                $("#CsdSize").value = "custom";
+                sizePicture();
+            });
+            function endGrip(e) {
+                if (grip && e.pointerId === grip.id) {
+                    grip = null;
+                    picSize.w = $("#CsdFrame").getBoundingClientRect().width;
+                    savePicSize();
+                }
+            }
+            $("#CsdGrip").addEventListener("pointerup", endGrip);
+            $("#CsdGrip").addEventListener("pointercancel", endGrip);
+            $("#CsdGrip").addEventListener("click", function (e) { e.stopPropagation(); });
 
             // ---- Cut ----
 
