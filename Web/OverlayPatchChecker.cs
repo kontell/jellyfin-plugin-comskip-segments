@@ -50,6 +50,15 @@ public sealed class OverlayPatchChecker : IHostedService
 
             if (missing.Count == 0)
             {
+                if (html.Contains("\"/ComskipSegments/web/", StringComparison.Ordinal))
+                {
+                    _logger.LogWarning(
+                        "Comskip web patch in {Path} is from an older version that loads from the site root, " +
+                        "which doesn't work behind a Base URL. Re-run Web/install-overlay.sh with sudo to update it.",
+                        indexPath);
+                    return Task.CompletedTask;
+                }
+
                 _logger.LogInformation("Comskip web patches present in {Path}", indexPath);
                 return Task.CompletedTask;
             }

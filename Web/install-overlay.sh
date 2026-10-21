@@ -46,26 +46,37 @@ patch_snippet() {
     local marker_begin="$1"
     local snippet="$2"
 
-    if grep -qF "$marker_begin" "$WEB_INDEX"; then
+    if WEB_INDEX="$WEB_INDEX" SNIPPET="$snippet" python3 -c 'import os,sys; sys.exit(0 if os.environ["SNIPPET"] in open(os.environ["WEB_INDEX"], encoding="utf-8").read() else 1)'; then
         echo "Already patched: $marker_begin"
         return 0
     fi
 
     ensure_backup
 
-    WEB_INDEX="$WEB_INDEX" SNIPPET="$snippet" python3 <<'PYEOF'
+    # A block from an older version of this script (e.g. one that loaded from the site root, which
+    # breaks behind a Base URL) is replaced in place; otherwise the block goes in before </body>.
+    WEB_INDEX="$WEB_INDEX" SNIPPET="$snippet" MARKER="$marker_begin" python3 <<'PYEOF'
 import os
 
 path = os.environ["WEB_INDEX"]
 snippet = os.environ["SNIPPET"]
+begin = os.environ["MARKER"]
+end = begin.replace(":begin -->", ":end -->")
 
 with open(path, "r", encoding="utf-8") as f:
     html = f.read()
 
-if "</body>" not in html:
-    raise SystemExit("error: no </body> tag found in " + path)
-
-html = html.replace("</body>", snippet + "</body>", 1)
+start = html.find(begin)
+stop = html.find(end, start) if start >= 0 else -1
+if start >= 0 and stop >= 0:
+    stop += len(end)
+    if html[stop:stop + 1] == "\n":
+        stop += 1
+    html = html[:start] + snippet + html[stop:]
+else:
+    if "</body>" not in html:
+        raise SystemExit("error: no </body> tag found in " + path)
+    html = html.replace("</body>", snippet + "</body>", 1)
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(html)
@@ -74,16 +85,17 @@ PYEOF
     echo "Patched: $marker_begin"
 }
 
+# Paths are relative to index.html (<server>[/<Base URL>]/web/), so a Base URL works.
 patch_snippet "<!-- ComskipSegments:overlay:begin -->" \
 '<!-- ComskipSegments:overlay:begin -->
-<link rel="stylesheet" href="/ComskipSegments/web/overlay.css">
-<script defer src="/ComskipSegments/web/overlay.js"></script>
+<link rel="stylesheet" href="../ComskipSegments/web/overlay.css">
+<script defer src="../ComskipSegments/web/overlay.js"></script>
 <!-- ComskipSegments:overlay:end -->
 '
 
 patch_snippet "<!-- ComskipSegments:itemmenu:begin -->" \
 '<!-- ComskipSegments:itemmenu:begin -->
-<script defer src="/ComskipSegments/web/itemmenu.js"></script>
+<script defer src="../ComskipSegments/web/itemmenu.js"></script>
 <!-- ComskipSegments:itemmenu:end -->
 '
 

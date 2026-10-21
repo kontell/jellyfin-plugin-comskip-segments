@@ -29,7 +29,8 @@
   // before they existed picks them up without re-running install-overlay.sh.
   if (!document.querySelector('script[src*="ComskipSegments/web/badges.js"]')) {
     var badges = document.createElement('script');
-    badges.src = '/ComskipSegments/web/badges.js';
+    // Beside this script, so a server with a Base URL (https://host/jellyfin/) works too.
+    badges.src = document.currentScript ? new URL('badges.js', document.currentScript.src).href : '../ComskipSegments/web/badges.js';
     badges.defer = true;
     document.head.appendChild(badges);
   }
