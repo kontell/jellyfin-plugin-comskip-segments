@@ -239,15 +239,17 @@ public sealed class CommercialCutService
             return new EditResult(false, $"The cut didn't finish ({outcome.Message}). Nothing was changed.");
         }
 
-        // The file is cut: from here, bring everything that pointed into it in line.
+        // The file is cut: from here, bring everything that pointed into it in line. Jellyfin
+        // re-reading the changed file prunes every segment provider's data for it (our detection
+        // record included), so the records are written after that.
         var foreignAside = PutEdlAside(path);
         var map = new CutMap(result.Kept);
         _store.Save(item.Id, new CommercialCutRecord(result.Kept, record.Breaks, record.Source, duration, !hadBackup, foreignAside, DateTime.UtcNow));
+        await RefreshAsync(item).ConfigureAwait(false);
         _detections.Save(item.Id, new DetectionRecord(DetectionStatus.NoCommercials, Array.Empty<CommercialBreak>(), DateTime.UtcNow, DetectionRecord.SourceCut));
         MoveProgramStart(item, map.Forward);
         await MoveResumePositionsAsync(item, map.Forward).ConfigureAwait(false);
-        await RefreshAsync(item).ConfigureAwait(false);
-        await PublishAsync(item, CancellationToken.None, clearFirst: true).ConfigureAwait(false);
+        await PublishAsync(item, CancellationToken.None).ConfigureAwait(false);
 
         var removed = duration - map.KeptSeconds;
         _logger.LogInformation("Cut {Removed:F1}s of commercials out of {Path}: {Message}", removed, path, outcome.Message);
@@ -361,13 +363,14 @@ public sealed class CommercialCutService
             _cuts.Finish(job);
         }
 
+        // As after a cut: Jellyfin's re-read prunes the segment data, so the breaks go back after it.
         _store.Remove(item.Id);
+        await RefreshAsync(item).ConfigureAwait(false);
         _detections.Save(item.Id, new DetectionRecord(DetectionStatus.Detected, record.BreaksBefore, DateTime.UtcNow, record.SourceBefore));
         RestoreEdl(item.Path!, record.ForeignEdlAside, record.BreaksBefore);
         MoveProgramStart(item, map.Back);
         await MoveResumePositionsAsync(item, map.Back).ConfigureAwait(false);
-        await RefreshAsync(item).ConfigureAwait(false);
-        await PublishAsync(item, CancellationToken.None, clearFirst: true).ConfigureAwait(false);
+        await PublishAsync(item, CancellationToken.None).ConfigureAwait(false);
         _logger.LogInformation("Commercial cut undone: {Path} is back to the original with {Count} break(s)", item.Path, record.BreaksBefore.Count);
         return new EditResult(true, $"The original is back, with its {record.BreaksBefore.Count} commercial break(s).");
     }
@@ -490,18 +493,13 @@ public sealed class CommercialCutService
         }
     }
 
-    // Re-asks the segment providers so players see the change now. After a cut every segment's
-    // time is off (other plugins' too), so they're all cleared first and asked again.
-    private async Task PublishAsync(BaseItem item, CancellationToken ct, bool clearFirst = false)
+    // Re-asks the segment providers so players see the change now. After a cut, Jellyfin's
+    // re-read has already dropped every segment (other plugins' too, whose times are off now).
+    private async Task PublishAsync(BaseItem item, CancellationToken ct)
     {
         try
         {
             var segments = _serviceProvider.GetRequiredService<IMediaSegmentManager>();
-            if (clearFirst)
-            {
-                await segments.DeleteSegmentsAsync(item.Id, ct).ConfigureAwait(false);
-            }
-
             await segments.RunSegmentPluginProviders(item, _libraryManager.GetLibraryOptions(item), true, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

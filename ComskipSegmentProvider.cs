@@ -162,12 +162,21 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     }
 
     /// <summary>
-    /// Called by Jellyfin when it prunes extracted segment data for an item. Drop our
-    /// stored detection record so the item is re-detected from scratch on the next scan
-    /// instead of serving stale breaks.
+    /// Called by Jellyfin when it prunes extracted segment data for an item (it does whenever
+    /// the file changes). Drop our stored detection record so the item is re-detected from
+    /// scratch on the next scan instead of serving stale breaks — except breaks set by hand
+    /// and a commercial cut's "none left": Comskip can't do better than those, the dashboard's
+    /// own cut and undo change the file themselves, and the trims that move every time clear
+    /// the record themselves.
     /// </summary>
     public Task CleanupExtractedData(Guid itemId, CancellationToken cancellationToken)
     {
+        if (_store.TryGet(itemId, out var record)
+            && record.Source is DetectionRecord.SourceEdited or DetectionRecord.SourceCut)
+        {
+            return Task.CompletedTask;
+        }
+
         _store.Remove(itemId);
         return Task.CompletedTask;
     }
