@@ -368,8 +368,10 @@ public sealed class CommercialCutService
     }
 
     /// <summary>
-    /// The .edl beside a cut recording no longer matches it. This plugin's own is deleted; another
-    /// program's is renamed to a hidden file (returned) so it's never read again, and Undo puts it back.
+    /// The .edl beside a cut recording no longer matches it. This plugin's own is deleted (its
+    /// breaks are in the cut record). Another program's goes with the kept original, named after
+    /// it (returned), so it's never read again, Undo puts it back, and it expires, moves and is
+    /// deleted along with the original. With no original kept there's no Undo, so it's deleted.
     /// </summary>
     private string? PutEdlAside(string path)
     {
@@ -386,7 +388,14 @@ public sealed class CommercialCutService
                 return null;
             }
 
-            var aside = Path.Combine(Path.GetDirectoryName(edl)!, "." + Path.GetFileName(edl) + ".uncut");
+            if (TrimBackups.Find(path) is not { } backup)
+            {
+                File.Delete(edl);
+                _logger.LogInformation("Deleted {Edl}: it no longer matches the cut recording, and no original was kept to undo to", edl);
+                return null;
+            }
+
+            var aside = TrimBackups.EdlFor(backup);
             File.Move(edl, aside, overwrite: true);
             return aside;
         }

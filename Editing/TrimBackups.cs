@@ -40,6 +40,13 @@ public sealed class TrimBackups
         Path.Combine(Path.GetDirectoryName(recordingPath)!, "." + Path.GetFileNameWithoutExtension(recordingPath) + ".original" + Path.GetExtension(recordingPath));
 
     /// <summary>
+    /// Where the .edl that went with <paramref name="backupPath"/> is kept, beside it and named
+    /// after it (".&lt;name&gt;.original.edl"), so it goes wherever the backup goes.
+    /// </summary>
+    public static string EdlFor(string backupPath) =>
+        Path.Combine(Path.GetDirectoryName(backupPath)!, Path.GetFileNameWithoutExtension(backupPath) + ".edl");
+
+    /// <summary>
     /// The kept original of <paramref name="recordingPath"/>, if there is one: the hidden backup,
     /// or one kept visibly as "&lt;name&gt;.original&lt;ext&gt;" by an earlier version.
     /// </summary>
@@ -109,6 +116,11 @@ public sealed class TrimBackups
                 {
                     File.Delete(path);
                     _logger.LogInformation("Deleted the kept original {Path}: its undo time is up", path);
+                }
+
+                if (File.Exists(EdlFor(path)))
+                {
+                    File.Delete(EdlFor(path));
                 }
 
                 Forget(path);

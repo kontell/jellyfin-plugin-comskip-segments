@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.ComskipSegments.Editing;
 /// <param name="SourceBefore">Where those came from (comskip, edl, edited).</param>
 /// <param name="SecondsBefore">The uncut length.</param>
 /// <param name="OwnBackup">The cut made the kept original (no earlier trim had), so Undo brings back exactly what was cut.</param>
-/// <param name="ForeignEdlAside">Another program's .edl, put aside as a hidden file because it no longer matched.</param>
+/// <param name="ForeignEdlAside">Another program's .edl, kept beside the original because it no longer matched the cut file.</param>
 public sealed record CommercialCutRecord(
     IReadOnlyList<KeptPart> Parts,
     IReadOnlyList<CommercialBreak> BreaksBefore,
