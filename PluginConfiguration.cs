@@ -213,12 +213,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AudioTrimAutomaticApply { get; set; }
 
     /// <summary>
-    /// True (default): keep the untouched original alongside the corrected file (renamed to
-    /// <c>&lt;name&gt;.original&lt;ext&gt;</c> in the same folder) so a bad trim can be
-    /// undone by hand. False: delete the original once the corrected file is verified in
-    /// place, saving disk space immediately.
+    /// True: keep the untouched original for good, hidden beside the corrected file
+    /// (<c>.&lt;name&gt;.original&lt;ext&gt;</c>), so a trim or cut can always be undone.
+    /// False (default since 1.3.1.0; a cut would otherwise take more space than it saves):
+    /// keep it for <see cref="TrimUndoDays"/>, then delete it.
     /// </summary>
-    public bool AudioTrimKeepOriginal { get; set; } = true;
+    public bool AudioTrimKeepOriginal { get; set; }
 
     /// <summary>
     /// When <see cref="AudioTrimKeepOriginal"/> is off: keep the original this many days anyway,
@@ -226,6 +226,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// it as soon as the trimmed file is in place. Applies to every trim (program start, audio).
     /// </summary>
     public int TrimUndoDays { get; set; } = 7;
+
+    /// <summary>
+    /// True (default): a kept original whose recording is gone (deleted, or moved without it)
+    /// can't be undone to, so it's deleted a day after the daily look finds it that way.
+    /// </summary>
+    public bool DeleteOrphanedOriginals { get; set; } = true;
 
     /// <summary>
     /// "Cut commercials out": a cut copies the video as it is, so each kept part has to start on a

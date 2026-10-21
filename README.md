@@ -175,8 +175,15 @@ it two ways:
   re-detect is queued — so a block-listed channel that a trim just touched stays
   block-listed rather than getting silently re-scanned as a side effect).
 
-**Keep the original file as a backup** (on by default) renames the untouched original to
-`<name>.original<ext>` next to the corrected file instead of deleting it.
+**Kept originals.** A trim or cut keeps the untouched original as a hidden file beside the
+recording (`.<name>.original<ext>`; Jellyfin doesn't list hidden files) so it can be undone.
+By default it's kept for **7 days** (*Otherwise, keep it for undo (days)*) and then deleted;
+**Keep the original file as a backup** keeps it for good instead (it was on by default before
+1.3.1.0 — while an original is kept, a cut saves no space). The dashboard shows how much
+space the kept originals take, with **Delete all originals** and a Delete original button per
+cut recording. An original whose recording was deleted or moved without it can't be undone
+to, so it's deleted a day after it's found that way (the plugin looks once a day; setting
+*Delete originals left without their recording*, on by default).
 
 ### Commercial segments dashboard
 
@@ -269,6 +276,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.3.1.0 | 2026-10-21 | Check a cut: its joins are marked on the timeline, with **‹ Join / Join ›**. **Delete original** per cut recording and **Delete all originals** with the space they take; originals left without their recording are deleted after a day. Kept originals now go after 7 days by default (*Keep the original file as a backup* is off for new installs; an existing setting is kept). Another program's `.edl` stays with the original after a cut. The editor's picture fits the window (or Small/Medium/Large/drag), with the timeline under the controls. Fixes: frames follow quick jumps; the start lands on the first frame. With JellyDVR Space, a moved recording keeps its Undo. |
 | 1.3.0.0 | 2026-10-21 | **Commercial segments dashboard** (admins): list of recordings with their breaks, and an editor to fix breaks frame by frame (wheel/keys, keyframes, previous/next black, mark-in/out), with timeline hover and scrubbing, an overview grid of every keyframe and fast forward/rewind. **Cut commercials out** of a recording with a fast stream copy, in the background, with Undo; resume positions and program start follow the cut. New setting: Cut rounding. Edited breaks survive Jellyfin re-reading the file. |
 | 1.2.0.2 | 2026-10-20 | Web overlay works behind a Base URL (it used absolute /ComskipSegments/ paths); **Install web overlay** button and status on the settings page, with the one-time permission command when Jellyfin can't change index.html; the plugin puts the overlay back by itself after a jellyfin-web update when it may (setting, on by default). Older patches show as "older version": press Update web overlay or re-run Web/install-overlay.sh. |
 | 1.2.0.1 | 2026-10-19 | Fix: Jellyfin could crash while Comskip ran (its output and error output were written into one buffer from two threads at once). Same fix for live scans and audio trims. |

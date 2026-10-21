@@ -115,6 +115,11 @@
             <div id="CsdList">
                 <div class="fieldDescription">Every recording the plugin has looked at: check its commercial breaks, fix them by hand, or cut them out of the file.</div>
                 <div class="csd-chips" id="CsdFilters" role="group" aria-label="Show"></div>
+                <div class="csd-row csd-hidden" id="CsdOriginals" style="margin: 8px 0;">
+                    <span class="csd-sub" id="CsdOriginalsText"></span>
+                    <button type="button" class="csd-btn" id="CsdOriginalsDel">Delete all originals…</button>
+                    <span class="csd-sub" id="CsdOriginalsResult"></span>
+                </div>
                 <div class="inputContainer" style="max-width: 420px;">
                     <label class="inputLabel inputLabelUnfocused" for="CsdSearch">Search</label>
                     <input id="CsdSearch" type="search" is="emby-input" placeholder="Title or show" />
@@ -365,6 +370,7 @@
             // ---- The list ----
 
             function loadList() {
+                loadOriginals();
                 return api("GET", "ComskipSegments/Dashboard").then(function (r) {
                     state.rows = r.Items || [];
                     renderList();
@@ -446,6 +452,38 @@
                         }
                     });
                 }
+            });
+
+            // The space the kept originals of cuts and trims take, all together (a scan of the library folders).
+            function loadOriginals() {
+                api("GET", "ComskipSegments/Dashboard/Originals").then(function (o) {
+                    $("#CsdOriginals").classList.toggle("csd-hidden", !o.Count && !$("#CsdOriginalsResult").textContent);
+                    $("#CsdOriginalsText").classList.toggle("csd-hidden", !o.Count);
+                    $("#CsdOriginalsDel").classList.toggle("csd-hidden", !o.Count);
+                    $("#CsdOriginalsDel").disabled = false;
+                    $("#CsdOriginalsText").textContent = "Kept originals of cut and trimmed recordings: " + o.Count + ", " + gb(o.Bytes)
+                        + (o.KeptForGood ? ", kept for good (Settings)." : o.UndoDays > 0 ? ", each deleted " + o.UndoDays + " days after its cut or trim." : ".")
+                        + (o.Orphans ? " " + o.Orphans + " (" + gb(o.OrphanBytes) + ") no longer have their recording and go within a day." : "");
+                    $("#CsdOriginalsDel").dataset.what = o.Count + " original" + (o.Count === 1 ? "" : "s") + " (" + gb(o.Bytes) + ")";
+                }, function () {
+                    $("#CsdOriginals").classList.add("csd-hidden");
+                });
+            }
+
+            $("#CsdOriginalsDel").addEventListener("click", function () {
+                var btn = this;
+                if (!window.confirm("Delete all " + btn.dataset.what + " for good? Those recordings stay cut or trimmed, and none of them can be undone any more.")) {
+                    return;
+                }
+                btn.disabled = true;
+                $("#CsdOriginalsResult").textContent = "Deleting…";
+                api("POST", "ComskipSegments/Dashboard/Originals/DeleteAll").then(function (r) {
+                    $("#CsdOriginalsResult").textContent = r.Message;
+                    loadList();
+                }, function () {
+                    btn.disabled = false;
+                    $("#CsdOriginalsResult").textContent = "Couldn't delete them.";
+                });
             });
 
             // "4.1 GB, kept until 28/10/2026." / "Not kept."

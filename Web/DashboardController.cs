@@ -39,6 +39,7 @@ public sealed class DashboardController : ControllerBase
     private readonly DetectionStore _detections;
     private readonly DetectionManager _manager;
     private readonly CommercialCutStore _cutStore;
+    private readonly KeptOriginals _kept;
     private readonly CommercialCutService _cutter;
     private readonly CutTracker _cuts;
     private readonly TrimBackups _backups;
@@ -50,6 +51,7 @@ public sealed class DashboardController : ControllerBase
         DetectionStore detections,
         DetectionManager manager,
         CommercialCutStore cutStore,
+        KeptOriginals kept,
         CommercialCutService cutter,
         CutTracker cuts,
         TrimBackups backups,
@@ -60,6 +62,7 @@ public sealed class DashboardController : ControllerBase
         _detections = detections;
         _manager = manager;
         _cutStore = cutStore;
+        _kept = kept;
         _cutter = cutter;
         _cuts = cuts;
         _backups = backups;
@@ -235,6 +238,55 @@ public sealed class DashboardController : ControllerBase
     [HttpPost("{itemId}/UndoCut")]
     public async Task<ActionResult<EditResult>> UndoCut([FromRoute] Guid itemId) =>
         _libraryManager.GetItemById(itemId) is BaseItem item ? Ok(await _cutter.UndoAsync(item).ConfigureAwait(false)) : NotFound();
+
+    /// <param name="Count">Kept originals in the library folders (from cuts and trims).</param>
+    /// <param name="Bytes">The space they take.</param>
+    /// <param name="Orphans">Of those, left without their recording (deleted once a day has passed).</param>
+    /// <param name="KeptForGood">Originals are kept for good (the setting), not for some days.</param>
+    /// <param name="UndoDays">Otherwise, how many days.</param>
+    public sealed record OriginalsSummary(int Count, long Bytes, int Orphans, long OrphanBytes, bool KeptForGood, int UndoDays);
+
+    /// <summary>How many kept originals there are and the space they take (a scan of the library folders, reused for 2 minutes).</summary>
+    [HttpGet("Originals")]
+    public ActionResult<OriginalsSummary> Originals()
+    {
+        var list = _kept.List(TimeSpan.FromMinutes(2));
+        var cfg = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        return Ok(new OriginalsSummary(
+            list.Count, list.Sum(o => o.Bytes), list.Count(o => o.Orphan), list.Where(o => o.Orphan).Sum(o => o.Bytes),
+            cfg.AudioTrimKeepOriginal, Math.Max(0, cfg.TrimUndoDays)));
+    }
+
+    /// <summary>Deletes every kept original (none of those trims or cuts can be undone after), except for recordings being cut now.</summary>
+    [HttpPost("Originals/DeleteAll")]
+    public ActionResult<EditResult> DeleteAllOriginals()
+    {
+        var list = _kept.List(TimeSpan.Zero);
+        int deleted = 0, skipped = 0;
+        long bytes = 0;
+        foreach (var o in list)
+        {
+            if (_libraryManager.FindByPath(o.RecordingPath, false) is { } item && (_cuts.IsBusy(item.Id) || _manager.IsInFlight(item.Id)))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (_kept.Delete(o.Path))
+            {
+                deleted++;
+                bytes += o.Bytes;
+            }
+            else
+            {
+                skipped++;
+            }
+        }
+
+        _kept.Changed();
+        return Ok(new EditResult(deleted > 0 || list.Count == 0,
+            $"Deleted {deleted} original(s): {bytes / 1e9:0.0} GB freed." + (skipped > 0 ? $" {skipped} left (being worked on, or couldn't be deleted)." : "")));
+    }
 
     /// <summary>Deletes a cut recording's kept original, to free its space; the cut can't be undone after.</summary>
     [HttpPost("{itemId}/DeleteOriginal")]

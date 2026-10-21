@@ -29,6 +29,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 
         serviceCollection.AddSingleton<AudioChannelScanner>();
         serviceCollection.AddSingleton<Editing.TrimBackups>();
+        serviceCollection.AddSingleton<Editing.KeptOriginals>();
         serviceCollection.AddHostedService<Editing.TrimBackupCleaner>();
         serviceCollection.AddSingleton<RecordingTrimmer>();
         serviceCollection.AddSingleton<AudioTrimStore>();

@@ -195,21 +195,56 @@ public sealed class TrimBackups
     }
 }
 
-/// <summary>Deletes kept originals whose undo time is up: at startup, then every hour.</summary>
+/// <summary>
+/// Deletes kept originals whose undo time is up: at startup, then every hour. Once a day
+/// (the first time 10 minutes after startup, once the library is loaded) it also looks through
+/// the library folders for originals left without their recording (see <see cref="KeptOriginals"/>).
+/// </summary>
 public sealed class TrimBackupCleaner : BackgroundService
 {
+    private static readonly TimeSpan OrphanEvery = TimeSpan.FromDays(1);
     private readonly TrimBackups _backups;
+    private readonly KeptOriginals _kept;
+    private readonly ILogger<TrimBackupCleaner> _logger;
 
-    public TrimBackupCleaner(TrimBackups backups) => _backups = backups;
+    public TrimBackupCleaner(TrimBackups backups, KeptOriginals kept, ILogger<TrimBackupCleaner> logger)
+    {
+        _backups = backups;
+        _kept = kept;
+        _logger = logger;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var nextOrphans = DateTime.UtcNow.AddMinutes(10);
         while (!stoppingToken.IsCancellationRequested)
         {
             _backups.DeleteExpired();
+            if (DateTime.UtcNow >= nextOrphans)
+            {
+                nextOrphans = DateTime.UtcNow + OrphanEvery;
+                try
+                {
+                    if (Plugin.Instance?.Configuration.DeleteOrphanedOriginals != false)
+                    {
+                        _kept.DeleteOrphans();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not look for kept originals left without their recording");
+                }
+            }
+
             try
             {
-                await Task.Delay(TimeSpan.FromHours(1), stoppingToken).ConfigureAwait(false);
+                var wait = TimeSpan.FromHours(1);
+                if (nextOrphans - DateTime.UtcNow < wait)
+                {
+                    wait = (nextOrphans - DateTime.UtcNow).Duration();
+                }
+
+                await Task.Delay(wait, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

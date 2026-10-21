@@ -192,13 +192,19 @@
                         <input id="AudioTrimKeepOriginal" name="AudioTrimKeepOriginal" type="checkbox" is="emby-checkbox" />
                         <span>Keep the original file as a backup</span>
                     </label>
-                    <div class="fieldDescription">Keeps the untouched original for good, as a hidden file next to the recording (<code>.&lt;name&gt;.original&lt;ext&gt;</code>; Jellyfin doesn't list hidden files), so "Undo trim" can always put it back. Off: it's kept for the days below, then deleted.</div>
+                    <div class="fieldDescription">Keeps the untouched original for good, as a hidden file next to the recording (<code>.&lt;name&gt;.original&lt;ext&gt;</code>; Jellyfin doesn't list hidden files), so "Undo trim" can always put it back. Each kept original takes as much space as the recording did, so a cut saves no space while it's kept. Off (the default): it's kept for the days below, then deleted.</div>
 
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="TrimUndoDays">Otherwise, keep it for undo (days)</label>
                         <input id="TrimUndoDays" name="TrimUndoDays" type="number" min="0" max="365" step="1" is="emby-input" />
                         <div class="fieldDescription">When the box above is off: how long a trim can be undone (a mistaken or curious press) before its original is deleted. 0 deletes it as soon as the trimmed file is in place. Applies to every trim: program start, audio format and cutting commercials out.</div>
                     </div>
+
+                    <label class="checkboxContainer">
+                        <input id="DeleteOrphanedOriginals" name="DeleteOrphanedOriginals" type="checkbox" is="emby-checkbox" />
+                        <span>Delete originals left without their recording</span>
+                    </label>
+                    <div class="fieldDescription">When a recording is deleted, or moved without its hidden original, the original stays behind and nothing can undo to it. Once a day the plugin looks through the library folders and deletes such an original a day after finding it.</div>
 
                     <div class="selectContainer">
                         <label class="selectLabel" for="CutRounding">Cutting commercials out: where each cut lands</label>
@@ -455,8 +461,9 @@
                 page.querySelector("#AutoInstallWebOverlay").checked = config.AutoInstallWebOverlay !== false;
                 page.querySelector("#EnableAudioFormatTrim").checked = !!config.EnableAudioFormatTrim;
                 page.querySelector("#AudioTrimAutomaticApply").checked = !!config.AudioTrimAutomaticApply;
-                page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal !== false;
+                page.querySelector("#AudioTrimKeepOriginal").checked = config.AudioTrimKeepOriginal === true;
                 page.querySelector("#TrimUndoDays").value = config.TrimUndoDays != null ? config.TrimUndoDays : 7;
+                page.querySelector("#DeleteOrphanedOriginals").checked = config.DeleteOrphanedOriginals !== false;
                 loadEditors(page, config.RecordingEditorUserIds || []);
                 page.querySelector("#AudioTrimMinCoreFraction").value = config.AudioTrimMinCoreFraction != null ? config.AudioTrimMinCoreFraction : 0.7;
                 page.querySelector("#AudioTrimMinJunkSeconds").value = config.AudioTrimMinJunkSeconds != null ? config.AudioTrimMinJunkSeconds : 5;
@@ -766,6 +773,7 @@
                         config.AudioTrimKeepOriginal = page.querySelector("#AudioTrimKeepOriginal").checked;
                         var undoDays = parseInt(page.querySelector("#TrimUndoDays").value, 10);
                         config.TrimUndoDays = isNaN(undoDays) ? 7 : Math.max(0, undoDays);
+                        config.DeleteOrphanedOriginals = page.querySelector("#DeleteOrphanedOriginals").checked;
                         config.RecordingEditorUserIds = Array.prototype.map.call(
                             page.querySelectorAll("#RecordingEditors input[data-user]:checked"),
                             function (box) { return box.getAttribute("data-user"); });

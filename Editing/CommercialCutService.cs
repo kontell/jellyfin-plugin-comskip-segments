@@ -399,6 +399,7 @@ public sealed class CommercialCutService
             }
 
             _backups.Forget(backup);
+            _serviceProvider.GetService<KeptOriginals>()?.Changed();
             _store.Save(item.Id, record with { ForeignEdlAside = null });
             _logger.LogInformation("Deleted the kept original {Path} ({Bytes} bytes) on request", backup, bytes);
             return new EditResult(true, $"The original is deleted: {bytes / 1e9:0.0} GB freed. The cut can't be undone now.");
