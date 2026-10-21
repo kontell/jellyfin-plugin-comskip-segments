@@ -643,9 +643,18 @@
                 }
                 showFrame();
                 cache.list = [];
-                var id = ed.id;
+                // Frames already on their way are for somewhere else (quick jumps): load these after them.
+                var id = ed.id, busy = !!cache.loading;
                 return loadFrames(t - 1.5).then(function () {
                     if (ed && ed.id === id && ed.head === t) {
+                        if (busy && !covers(t)) {
+                            cache.list = [];
+                            return loadFrames(t - 1.5).then(function () {
+                                if (ed && ed.id === id && ed.head === t) {
+                                    showFrame();
+                                }
+                            });
+                        }
                         showFrame();
                     }
                 });
@@ -732,7 +741,12 @@
             // Shows the frame at the playhead (from the frames in hand, or one picture from the server), the strip around it, the timeline.
             var frameTimer = null;
             function showFrame() {
-                var l = cache.list, i = indexAt(ed.head);
+                var l = cache.list;
+                if (l.length && ed.head < l[0].T && l[0].T < 0.1) {
+                    // The very start: onto the first frame.
+                    ed.head = l[0].T;
+                }
+                var i = indexAt(ed.head);
                 if (i >= 0 && covers(ed.head)) {
                     ed.head = l[i].T;
                 }
