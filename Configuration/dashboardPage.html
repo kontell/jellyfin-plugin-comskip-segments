@@ -39,6 +39,7 @@
         #ComskipDashboardPage .csd-side { flex: 1 1 260px; min-width: 0; }
         #ComskipDashboardPage .csd-frame { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
         #ComskipDashboardPage .csd-frame img { width: 100%; height: 100%; object-fit: contain; }
+        #ComskipDashboardPage .csd-frame img:not([src]) { visibility: hidden; }
         #ComskipDashboardPage .csd-frame .csd-time { position: absolute; left: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #fff; }
         #ComskipDashboardPage .csd-frame .csd-where { position: absolute; right: 10px; bottom: 10px; padding: 3px 9px; border-radius: 4px; background: rgba(229,57,53,0.85); color: #fff; }
         #ComskipDashboardPage .csd-timeline { position: relative; height: 52px; background: rgba(255,255,255,0.12); border-radius: 6px; margin-top: 22px; cursor: pointer; touch-action: none; user-select: none; }
@@ -104,7 +105,7 @@
                 <div class="csd-split" style="margin-top: 1em;">
                     <div class="csd-preview">
                         <div class="csd-frame">
-                            <img id="CsdImg" alt="The frame at the playhead" />
+                            <img id="CsdImg" alt="" />
                             <span class="csd-time csd-mono" id="CsdTime"></span>
                             <span class="csd-where csd-hidden" id="CsdWhere"></span>
                         </div>
@@ -350,6 +351,8 @@
                 $("#CsdSaveResult").textContent = "";
                 $("#CsdRescanResult").textContent = "";
                 $("#CsdCutBox").classList.add("csd-hidden");
+                $("#CsdImg").removeAttribute("src");
+                $("#CsdImg").alt = "";
                 return loadDetail(id, true);
             }
 
@@ -478,6 +481,7 @@
                                 URL.revokeObjectURL(img.src);
                             }
                             img.src = URL.createObjectURL(b);
+                            img.alt = "The picture at " + clock(at, true);
                         }
                     }).catch(function () {});
                 }, 150);
