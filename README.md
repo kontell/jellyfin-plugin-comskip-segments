@@ -178,6 +178,31 @@ it two ways:
 **Keep the original file as a backup** (on by default) renames the untouched original to
 `<name>.original<ext>` next to the corrected file instead of deleting it.
 
+### Commercial segments dashboard
+
+Dashboard → **Commercial segments** (admins) lists the recordings with their breaks, with
+filters, search and a bar per recording showing where the breaks fall. Open one to fix
+its breaks frame by frame and, if you like, cut them out of the file.
+
+- **Moving around:** the timeline shows every break; point at it to see that moment's
+  picture, drag along it to scrub, or open the **Overview** grid of the whole recording
+  (one picture per keyframe, made in the background the first time a recording is
+  opened, a few seconds per episode, kept in the plugin's folder until the file changes
+  or 30 days unopened). **◀◀ / ▶▶** flip through the overview at 2–16 pictures a second.
+- **Stepping:** ←/→ or the mouse wheel step one frame, Shift one second, ↑/↓ (or Ctrl +
+  wheel) the previous/next keyframe, `,`/`.` the previous/next black frames.
+  J/K/L rewind/stop/fast forward.
+- **Fixing breaks:** `[` and `]` (or the Start/End buttons) move the edge of the break
+  you're in, or mark a new break's start and end anywhere else. Save writes the breaks
+  (and the `.edl` beside the recording when that setting is on); only commercial
+  segments are edited, intro/recap segments from other plugins are left alone.
+- **Cut commercials out:** removes the breaks from the file with a fast stream copy (no
+  re-encode), in the background with progress. Cuts land on keyframes; **Cut rounding**
+  in settings picks whether a split second of ad or of show is kept at each edge. Not
+  while the recording is still recording or someone is watching it. Resume positions
+  and the program start move with the cut, and **Undo cut** puts the original back for
+  as long as it's kept (the audio-trim backup settings).
+
 ## The one file to watch
 
 `ComskipSegmentProvider.cs` is the only file touching the version-sensitive
@@ -203,6 +228,7 @@ be updated together, or Option A installs above break:
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.3.0.0 | 2026-10-21 | **Commercial segments dashboard** (admins): list of recordings with their breaks, and an editor to fix breaks frame by frame (wheel/keys, keyframes, previous/next black, mark-in/out), with timeline hover and scrubbing, an overview grid of every keyframe and fast forward/rewind. **Cut commercials out** of a recording with a fast stream copy, in the background, with Undo; resume positions and program start follow the cut. New setting: Cut rounding. Edited breaks survive Jellyfin re-reading the file. |
 | 1.2.0.2 | 2026-10-20 | Web overlay works behind a Base URL (it used absolute /ComskipSegments/ paths); **Install web overlay** button and status on the settings page, with the one-time permission command when Jellyfin can't change index.html; the plugin puts the overlay back by itself after a jellyfin-web update when it may (setting, on by default). Older patches show as "older version": press Update web overlay or re-run Web/install-overlay.sh. |
 | 1.2.0.1 | 2026-10-19 | Fix: Jellyfin could crash while Comskip ran (its output and error output were written into one buffer from two threads at once). Same fix for live scans and audio trims. |
 | 1.2.0.0 | 2026-10-10 | **Install Comskip** button (self-contained Comskip 0.83.001 for Linux x86-64/arm64, built from the GPL-2.0 source) and a clear "Comskip isn't installed" message instead of a silent failure; program start from remembered channel cards (skip marker or trim, in the background with progress, Undo trim for 7 days); recording edits limited to chosen users with a confirmation step; Remove commercials keeps them removed; web item menu follows the item's state. Re-run Web/install-overlay.sh for the web features. |
