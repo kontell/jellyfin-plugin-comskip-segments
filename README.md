@@ -206,6 +206,16 @@ its breaks frame by frame and, if you like, cut them out of the file.
   while the recording is still recording or someone is watching it. Resume positions
   and the program start move with the cut, and **Undo cut** puts the original back for
   as long as it's kept (the audio-trim backup settings).
+- **Checking a cut:** open a cut recording and the places where the cut joined what it
+  kept are marked green on the timeline; **‹ Join** / **Join ›** land a few seconds before
+  each, with how much was taken out there, so you can play across it.
+- **Delete original:** frees the kept original's space before its time is up (in the Cut
+  list and the editor); the recording stays cut but can't be undone after. Another
+  program's `.edl` that no longer matched the cut file is kept beside the original and
+  goes with it. With JellyDVR Space, moving or deleting a recording takes its kept
+  original along, and Undo still works after a move.
+- **Picture size:** **Fit the window** (default) keeps the frames, controls and timeline
+  in view below the picture; or Small, Medium, Large, or drag the picture's corner.
 
 #### Screenshots
 
