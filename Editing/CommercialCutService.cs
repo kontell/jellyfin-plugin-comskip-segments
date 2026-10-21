@@ -12,6 +12,7 @@ using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.ProgramStart;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.MediaSegments;
 using MediaBrowser.Controller.Session;
@@ -36,9 +37,6 @@ public sealed record CutResult(bool Ok, string Message, DateTime FinishedUtc);
 /// </summary>
 public sealed class CommercialCutService
 {
-    // A recording written to this recently may still be recording.
-    private static readonly TimeSpan StillRecording = TimeSpan.FromMinutes(2);
-
     private readonly ILogger<CommercialCutService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILibraryManager _libraryManager;
@@ -150,15 +148,9 @@ public sealed class CommercialCutService
             return "Someone is watching this recording. Try again when they've stopped.";
         }
 
-        try
+        if (_serviceProvider.GetService<IRecordingsManager>()?.GetActiveRecordingInfo(item.Path) is not null)
         {
-            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(item.Path) < StillRecording)
-            {
-                return "This recording is still being written (recording now?). Try again once it has finished.";
-            }
-        }
-        catch (IOException)
-        {
+            return "This is still recording. Try again once it has finished.";
         }
 
         return null;
