@@ -505,6 +505,12 @@
                 return found;
             }
 
+            // Where to load from so the next frames back end where the ones in hand start (no gap, whatever the frame rate).
+            function backFrom() {
+                var l = cache.list, dt = l.length > 1 ? (l[l.length - 1].T - l[0].T) / (l.length - 1) : 1 / 30;
+                return Math.max(0, l[0].T - dt * (WINDOW - 1) - dt / 2);
+            }
+
             function covers(t) {
                 var l = cache.list;
                 return l.length > 0 && t >= l[0].T - 0.0005 && t <= l[l.length - 1].T + 0.0005;
@@ -537,6 +543,8 @@
                     if (cache.id === id) {
                         cache.loading = null;
                         $("#CsdLoading").classList.add("csd-hidden");
+                        // Steps taken while these loaded.
+                        drainSteps();
                     }
                 });
                 return cache.loading;
@@ -545,6 +553,7 @@
             // Moves the playhead to t, onto the frame there (loading the frames around it first if needed).
             function goTo(t) {
                 t = Math.max(0, Math.min(ed.seconds, t));
+                cache.pending = 0;
                 ed.head = t;
                 if (covers(t)) {
                     showFrame();
@@ -593,7 +602,7 @@
                     cache.pending = 0;
                     return;
                 }
-                loadFrames(target < 0 ? l[0].T - 4 : l[edge].T + 0.001).then(drainSteps);
+                loadFrames(target < 0 ? backFrom() : l[edge].T + 0.001);
             }
 
             function stepKeyframe(dir) {
@@ -660,7 +669,7 @@
                     if (!cache.loading && i > l.length - 40 && l[l.length - 1].T < ed.seconds - 0.05) {
                         loadFrames(l[l.length - 1].T + 0.001);
                     } else if (!cache.loading && i < 40 && l[0].T > 0.001) {
-                        loadFrames(l[0].T - 4);
+                        loadFrames(backFrom());
                     }
                     return;
                 }
