@@ -61,6 +61,10 @@ The build output DLL is `Jellyfin.Plugin.ComskipSegments.dll` under
 2. Dashboard → Plugins → **Catalog** → **Comskip Commercial Segments** → Install.
 3. Restart Jellyfin.
 
+The JellyDVR plugin repository lists Comskip Commercial Segments too, beside the other JellyDVR
+plugins (Episode History, JellyDVR Space, Schedule and Live, XMLTV Guide Cleaner):
+`https://raw.githubusercontent.com/mackandall/jdvr-client/main/plugins/manifest.json`. Add one or the other, not both.
+
 ### Option B: build and install manually
 
 1. Find your Jellyfin plugins folder. On a Linux package install it's typically
