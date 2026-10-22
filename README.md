@@ -139,6 +139,9 @@ that case rather than being hidden outright.
   Comskip's `0` (cut) and Kodi/Channels-style `3` (commercial break). Such a file is never
   overwritten; "Also place a copy of the .edl next to the recording" only replaces `.edl`
   files this plugin wrote itself.
+  Jellyfin's library scan doesn't ask for segments, so after adding a library (or files)
+  that come with `.edl`s, run Dashboard → Scheduled Tasks → **Media Segment Scan** once
+  rather than wait for it; until then those videos show no commercials.
 - **Library renamed or its folders edited:** Jellyfin deletes and re-creates every item
   of the library, which also deletes their segments. The plugin notices each re-added
   item that it has breaks for and publishes them again about 15 seconds later.
