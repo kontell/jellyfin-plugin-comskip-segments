@@ -304,4 +304,8 @@ reality (`gh repo view --json description,repositoryTopics`):
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GPL-2.0-or-later: you can redistribute and change it under the terms of the GNU General Public
+License, version 2 or (at your option) any later version. See [LICENSE](LICENSE).
+
+The official source and releases are at <https://github.com/mackandall/jellyfin-plugin-comskip-segments>.
+Releases up to 1.3.1.0 were published under the MIT licence.
