@@ -330,16 +330,18 @@ public sealed class DetectionManager : BackgroundService
             return;
         }
 
-        if (_store.TryGet(e.Item.Id, out _))
+        var item = e.Item;
+        _ = Task.Run(() => ImportAlternatesAsync(item));
+
+        if (_store.TryGet(item.Id, out _))
         {
-            RepublishIfMissing(e.Item.Id);
+            RepublishIfMissing(item.Id);
             return;
         }
 
         // A recording moved to another folder (Space's sorting, Move to archive) comes back as
         // a new item with our .edl beside it: import it now rather than at the next daily
         // Media Segment Scan. Off the event thread: the File.Exists may be on a NAS.
-        var item = e.Item;
         _ = Task.Run(() =>
         {
             if (TryImportSiblingEdl(item, out _))
@@ -349,6 +351,39 @@ public sealed class DetectionManager : BackgroundService
 
             return Task.CompletedTask;
         });
+    }
+
+    /// <summary>
+    /// The other versions of a newly added video (pieces of a recording split by a restart, a
+    /// re-record beside the old copy) raise no ItemAdded of their own: Jellyfin attaches them to
+    /// the main version in the same refresh. Each one moved in with an .edl beside it gets it too.
+    /// </summary>
+    private async Task ImportAlternatesAsync(BaseItem item)
+    {
+        try
+        {
+            await Task.Delay(RepublishDelay, _stoppingToken).ConfigureAwait(false); // until they're attached
+            var alternates = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                OwnerIds = new[] { item.Id },
+                IncludeOwnedItems = true,
+                IsFolder = false
+            }).OfType<Video>();
+            foreach (var alternate in alternates)
+            {
+                if (!_store.TryGet(alternate.Id, out _) && TryImportSiblingEdl(alternate, out _))
+                {
+                    await PublishAsync(alternate, forceOverwrite: true, _stoppingToken).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Looking for other versions of {Path} failed", item.Path);
+        }
     }
 
     /// <summary>
