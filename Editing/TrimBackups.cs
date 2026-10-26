@@ -126,11 +126,13 @@ public sealed class TrimBackups
     }
 
     /// <summary>
-    /// Deletes the backups whose time is up. One that's gone from its place is only dropped then
-    /// too: it may have moved, and <see cref="Follow"/> picks it up when its recording turns up.
+    /// Deletes the backups whose time is up; the ones deleted. One that's gone from its place is
+    /// only dropped then too: it may have moved, and <see cref="Follow"/> picks it up when its
+    /// recording turns up.
     /// </summary>
-    public void DeleteExpired()
+    public List<string> DeleteExpired()
     {
+        var deleted = new List<string>();
         List<string> due;
         lock (_lock)
         {
@@ -146,6 +148,7 @@ public sealed class TrimBackups
                 {
                     File.Delete(path);
                     _logger.LogInformation("Deleted the kept original {Path}: its undo time is up", path);
+                    deleted.Add(path);
                 }
 
                 if (File.Exists(EdlFor(path)))
@@ -161,6 +164,8 @@ public sealed class TrimBackups
                 _logger.LogWarning(ex, "Could not delete the kept original {Path}", path);
             }
         }
+
+        return deleted;
     }
 
     private Dictionary<string, DateTime> Load()
@@ -219,7 +224,11 @@ public sealed class TrimBackupCleaner : BackgroundService
         var nextOrphans = DateTime.UtcNow.AddMinutes(10);
         while (!stoppingToken.IsCancellationRequested)
         {
-            _backups.DeleteExpired();
+            foreach (var deleted in _backups.DeleteExpired())
+            {
+                _kept.TidyAfter(deleted);
+            }
+
             if (DateTime.UtcNow >= nextOrphans)
             {
                 nextOrphans = DateTime.UtcNow + OrphanEvery;

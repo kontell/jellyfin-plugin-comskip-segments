@@ -124,10 +124,32 @@ public sealed class KeptOriginals
             if (now - since >= OrphanGrace && Delete(o.Path))
             {
                 _logger.LogInformation("Deleted the kept original {Path} ({Bytes} bytes): its recording has been gone since {Since}", o.Path, o.Bytes, since);
+                TidyAfter(o.Path);
             }
         }
 
         Changed();
+    }
+
+    /// <summary>
+    /// After a kept original went: its folder, and the season and show folders above it, when no
+    /// video is left in them (its recording was moved or deleted without it).
+    /// </summary>
+    public void TidyAfter(string backupPath)
+    {
+        if (RecordingOf(backupPath) is { } recording && File.Exists(recording))
+        {
+            return;
+        }
+
+        try
+        {
+            EmptiedFolders.Remove(System.IO.Path.GetDirectoryName(backupPath)!, Roots(), _logger);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not tidy the folder of {Path}", backupPath);
+        }
     }
 
     private List<KeptOriginal> Scan()
