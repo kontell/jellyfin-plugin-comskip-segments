@@ -325,10 +325,30 @@ public sealed class DetectionManager : BackgroundService
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
     {
-        if (e.Item is Video)
+        if (e.Item is not Video)
+        {
+            return;
+        }
+
+        if (_store.TryGet(e.Item.Id, out _))
         {
             RepublishIfMissing(e.Item.Id);
+            return;
         }
+
+        // A recording moved to another folder (Space's sorting, Move to archive) comes back as
+        // a new item with our .edl beside it: import it now rather than at the next daily
+        // Media Segment Scan. Off the event thread: the File.Exists may be on a NAS.
+        var item = e.Item;
+        _ = Task.Run(() =>
+        {
+            if (TryImportSiblingEdl(item, out _))
+            {
+                return PublishAsync(item, forceOverwrite: true, _stoppingToken);
+            }
+
+            return Task.CompletedTask;
+        });
     }
 
     /// <summary>
