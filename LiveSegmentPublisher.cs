@@ -51,7 +51,8 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 /// <see cref="LiveBreakTracker"/> first: a break is stored once two consecutive passes
 /// report it, its end follows the latest pass, and it is withdrawn only after two passes
 /// without it, which drops the one-pass false breaks a full analysis of a growing file
-/// produces. The live list, which only ever adds, is stored as it is.
+/// produces; breaks under 20 s are left to the final pass, which applies the ini's own
+/// minimum. The live list, which only ever adds, is stored as it is.
 ///
 /// The rows carry this plugin's provider id, so the publish that follows the harvest
 /// (<see cref="DetectionManager"/> re-running the providers with overwrite) replaces
@@ -65,6 +66,9 @@ public sealed class LiveSegmentPublisher : BackgroundService
 
     /// <summary>Consecutive periodic passes a break must appear in before it is stored.</summary>
     private const int ConfirmPasses = 2;
+
+    /// <summary>Shortest break the periodic analysis gets stored for; see <see cref="LiveBreakTracker"/>.</summary>
+    private const double MinPeriodicBreakSeconds = 20;
 
     /// <summary>A row whose start is this close to a break's is that break's row.</summary>
     private const long StartToleranceTicks = (long)(1.5 * TimeSpan.TicksPerSecond);
@@ -200,7 +204,7 @@ public sealed class LiveSegmentPublisher : BackgroundService
     /// </summary>
     private IReadOnlyList<CommercialBreak> ConfirmedBreaks(string path, string edl, PluginConfiguration cfg)
     {
-        var analysis = _analyses.GetOrAdd(path, _ => new Analysis(new LiveBreakTracker(ConfirmPasses)));
+        var analysis = _analyses.GetOrAdd(path, _ => new Analysis(new LiveBreakTracker(ConfirmPasses, MinPeriodicBreakSeconds)));
         var written = File.GetLastWriteTimeUtc(edl);
         if (written != analysis.LastPassUtc)
         {

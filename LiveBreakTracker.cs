@@ -24,12 +24,17 @@ public sealed class LiveBreakTracker
     private const long StartToleranceTicks = (long)(1.5 * TimeSpan.TicksPerSecond);
 
     private readonly int _confirmPasses;
+    private readonly long _minTicks;
     private List<Candidate> _candidates = new();
 
     /// <param name="confirmPasses">Consecutive passes a break must appear in before it is stored.</param>
-    public LiveBreakTracker(int confirmPasses)
+    /// <param name="minSeconds">Shortest break stored. The final pass applies the ini's
+    /// min_commercialbreak; a pass over a growing file can report shorter ones (a 7.8 s
+    /// "break" at the very start of a recording, seen live, that the final pass dropped).</param>
+    public LiveBreakTracker(int confirmPasses, double minSeconds)
     {
         _confirmPasses = Math.Max(1, confirmPasses);
+        _minTicks = (long)(Math.Max(0, minSeconds) * TimeSpan.TicksPerSecond);
     }
 
     /// <summary>The breaks currently worth storing, sorted by start.</summary>
@@ -70,7 +75,7 @@ public sealed class LiveBreakTracker
         next.Sort((a, b) => a.StartTicks.CompareTo(b.StartTicks));
         _candidates = next;
         var confirmed = next
-            .Where(c => c.Seen >= _confirmPasses)
+            .Where(c => c.Seen >= _confirmPasses && c.EndTicks - c.StartTicks >= _minTicks)
             .Select(c => new CommercialBreak(c.StartTicks, c.EndTicks))
             .ToList();
         var changed = !confirmed.SequenceEqual(Confirmed);
