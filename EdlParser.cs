@@ -25,10 +25,14 @@ public static class EdlParser
     private const int CommercialBreakAction = 3;
 
     public static IReadOnlyList<CommercialBreak> Parse(string edlPath, double paddingSeconds)
+        => ParseLines(File.ReadLines(edlPath), paddingSeconds);
+
+    /// <summary>The same, over lines already read (a file Comskip may still be rewriting is read whole first).</summary>
+    public static IReadOnlyList<CommercialBreak> ParseLines(IEnumerable<string> lines, double paddingSeconds)
     {
         var breaks = new List<CommercialBreak>();
 
-        foreach (var raw in File.ReadLines(edlPath))
+        foreach (var raw in lines)
         {
             var line = raw.Trim();
             if (line.Length == 0)

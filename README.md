@@ -17,6 +17,12 @@ wired for Jellyfin's media-segment system.
 - **Crash ≠ empty.** `DetectionStore` records "no commercials found" and "detection
   failed" differently, so a corrupt/truncated `.ts` is retried later instead of being
   marked done forever.
+- **Recordings in progress.** With live scanning on, the breaks the live Comskip has
+  found so far are stored as Commercial segments while the recording is still being
+  written (`LiveSegmentPublisher`), so any client that reads Jellyfin's own segments can
+  skip them while catching up on a programme still being recorded, not only the web and
+  TV forks that ask `/ComskipSegments/Live`. The final result replaces them once the
+  recording settles.
 - **Read recordings, write a work dir.** Comskip is always invoked with an explicit
   `--output` work directory the service account owns; the read-only recordings folder is
   never written to.

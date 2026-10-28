@@ -135,16 +135,9 @@ public sealed class BadgeController : ControllerBase
 
                     var scanning = _live.IsTracking(path);
                     int? minutes = null;
-                    if (scanning && _live.GetLiveEdl(path) is { } edl)
+                    if (scanning && _live.GetLiveBreaks(path) is { } found)
                     {
-                        try
-                        {
-                            minutes = Minutes(EdlParser.Parse(edl, 0), roundUp: false);
-                        }
-                        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
-                        {
-                            // Being rewritten by Comskip at this instant; show "scanning" without a count.
-                        }
+                        minutes = Minutes(found, roundUp: false);
                     }
 
                     var recordingItem = _libraryManager.FindByPath(path, false);
@@ -191,17 +184,9 @@ public sealed class BadgeController : ControllerBase
         }
 
         var segments = new List<LiveSegment>();
-        if (_live.GetLiveEdl(path) is { } edl)
+        if (_live.GetLiveBreaks(path) is { } breaks)
         {
-            try
-            {
-                var padding = (Plugin.Instance?.Configuration ?? new PluginConfiguration()).PaddingSeconds;
-                segments.AddRange(EdlParser.Parse(edl, padding).Select(b => new LiveSegment("Commercial", b.StartTicks, b.EndTicks)));
-            }
-            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
-            {
-                // Being rewritten by Comskip at this instant; the next poll gets it.
-            }
+            segments.AddRange(breaks.Select(b => new LiveSegment("Commercial", b.StartTicks, b.EndTicks)));
         }
 
         return Ok(new LiveResponse(true, segments));

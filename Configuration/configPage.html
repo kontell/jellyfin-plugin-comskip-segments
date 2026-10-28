@@ -109,6 +109,12 @@
                         <input id="EnableLiveScanStart" name="EnableLiveScanStart" type="checkbox" is="emby-checkbox" />
                         <span>Start Comskip while the recording is still in progress</span>
                     </label>
+
+                    <label class="checkboxContainer">
+                        <input id="PublishLiveSegments" name="PublishLiveSegments" type="checkbox" is="emby-checkbox" />
+                        <span>Store the breaks found so far as segments while the recording is in progress</span>
+                    </label>
+                    <div class="fieldDescription">Clients that read Jellyfin's own segments can then skip them before the recording finishes; the final result replaces them once it settles.</div>
                 </div>
 
                 <div class="verticalSection">
@@ -444,6 +450,7 @@
                 page.querySelector("#AutoScanIntervalHours").value = config.AutoScanIntervalHours != null ? config.AutoScanIntervalHours : 6;
                 page.querySelector("#EnableMediaSegmentScanEnqueue").checked = config.EnableMediaSegmentScanEnqueue !== false;
                 page.querySelector("#EnableLiveScanStart").checked = !!config.EnableLiveScanStart;
+                page.querySelector("#PublishLiveSegments").checked = config.PublishLiveSegments !== false;
                 page.querySelector("#SeriesAllowList").value = config.SeriesAllowList || "";
                 page.querySelector("#SeriesBlockList").value = config.SeriesBlockList || "";
                 page.querySelector("#ChannelAllowList").value = config.ChannelAllowList || "";
@@ -753,6 +760,7 @@
                         config.AutoScanIntervalHours = isNaN(autoScan) || autoScan < 0 ? 0 : autoScan;
                         config.EnableMediaSegmentScanEnqueue = page.querySelector("#EnableMediaSegmentScanEnqueue").checked;
                         config.EnableLiveScanStart = page.querySelector("#EnableLiveScanStart").checked;
+                        config.PublishLiveSegments = page.querySelector("#PublishLiveSegments").checked;
                         config.SeriesAllowList = page.querySelector("#SeriesAllowList").value;
                         config.SeriesBlockList = page.querySelector("#SeriesBlockList").value;
                         config.ChannelAllowList = page.querySelector("#ChannelAllowList").value;

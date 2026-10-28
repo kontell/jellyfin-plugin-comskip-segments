@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.ProgramStart;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
@@ -39,7 +43,10 @@ namespace Jellyfin.Plugin.ComskipSegments.Providers;
 /// Serves already-computed commercial segments from our store. It never runs Comskip
 /// itself — detection is done out of band by <see cref="DetectionManager"/>. If an item
 /// hasn't been processed yet, this quietly enqueues it and returns nothing for now, so
-/// the Media Segment Scan stays fast and the results appear on the next pass.
+/// the Media Segment Scan stays fast and the results appear on the next pass. For a
+/// recording still being written with a live scan running, it serves what that scan has
+/// found so far (<see cref="LiveScanCoordinator.GetLiveBreaks"/>), so the one writer of
+/// segments, Jellyfin's provider run, stores them while the recording is in progress.
 /// </summary>
 public sealed class ComskipSegmentProvider : IMediaSegmentProvider
 {
@@ -48,22 +55,34 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     private readonly DetectionManager _manager;
     private readonly ILibraryManager _libraryManager;
     private readonly ProgramStartStore _programStarts;
+    private readonly LiveScanCoordinator _live;
 
     public ComskipSegmentProvider(
         ILogger<ComskipSegmentProvider> logger,
         DetectionStore store,
         DetectionManager manager,
         ILibraryManager libraryManager,
-        ProgramStartStore programStarts)
+        ProgramStartStore programStarts,
+        LiveScanCoordinator live)
     {
         _logger = logger;
         _store = store;
         _manager = manager;
         _libraryManager = libraryManager;
         _programStarts = programStarts;
+        _live = live;
     }
 
-    public string Name => "Comskip Commercial Segments";
+    public const string ProviderName = "Comskip Commercial Segments";
+
+    /// <summary>
+    /// What Jellyfin files this provider's rows under: the derivation MediaSegmentManager
+    /// applies to <see cref="Name"/>. <see cref="LiveSegmentPublisher"/> writes its rows
+    /// with it, so the live rows and the final ones are one provider's to Jellyfin.
+    /// </summary>
+    public static readonly string ProviderId = ProviderName.ToLowerInvariant().GetMD5().ToString("N", CultureInfo.InvariantCulture);
+
+    public string Name => ProviderName;
 
     public ValueTask<bool> Supports(BaseItem item)
     {
@@ -108,6 +127,16 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
 
     private IReadOnlyList<MediaSegmentDto> CommercialSegments(Guid itemId)
     {
+        // A recording still being written, with a live scan tailing it: its breaks so far.
+        // Only until a finished result exists; that one is the store's.
+        if (!_store.IsCompleted(itemId)
+            && _libraryManager.GetItemById(itemId) is BaseItem recording
+            && recording.Path is { } recordingPath
+            && _live.IsTracking(recordingPath)
+            && _live.GetLiveBreaks(recordingPath) is { } liveBreaks)
+        {
+            return ToSegments(itemId, liveBreaks);
+        }
 
         // Not processed yet, but another program (SageTV, Channels DVR, Emby) left an .edl
         // beside the video: use it now, so archives added from elsewhere get their breaks
@@ -140,14 +169,12 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
     }
 
     private static IReadOnlyList<MediaSegmentDto> ToSegments(Guid itemId, DetectionRecord record)
-    {
-        if (record.Status != DetectionStatus.Detected)
-        {
-            return Array.Empty<MediaSegmentDto>();
-        }
+        => record.Status == DetectionStatus.Detected ? ToSegments(itemId, record.Breaks) : Array.Empty<MediaSegmentDto>();
 
-        var segments = new List<MediaSegmentDto>(record.Breaks.Count);
-        foreach (var b in record.Breaks)
+    private static IReadOnlyList<MediaSegmentDto> ToSegments(Guid itemId, IReadOnlyList<CommercialBreak> breaks)
+    {
+        var segments = new List<MediaSegmentDto>(breaks.Count);
+        foreach (var b in breaks)
         {
             segments.Add(new MediaSegmentDto
             {
