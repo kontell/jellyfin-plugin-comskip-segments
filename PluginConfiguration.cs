@@ -69,6 +69,15 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableLiveScanStart { get; set; }
 
     /// <summary>
+    /// With live scans on, store the breaks the live Comskip has found so far as Jellyfin
+    /// Commercial segments while the recording is still being written, so a client that
+    /// reads Jellyfin's own segments can skip them before the recording finishes. The
+    /// final result replaces them once the recording settles. On by default because a
+    /// live scan whose findings nobody can use until the end is only a faster post-scan.
+    /// </summary>
+    public bool PublishLiveSegments { get; set; } = true;
+
+    /// <summary>
     /// How often, in hours, the "Scan library for commercials (Comskip)" task runs on
     /// its own as a safety net for recordings the live-event watcher misses (Jellyfin
     /// raises ItemUpdated rather than ItemAdded when a recording finishes over an

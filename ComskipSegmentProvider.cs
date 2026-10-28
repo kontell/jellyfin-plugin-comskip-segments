@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.ComskipSegments.Detection;
 using Jellyfin.Plugin.ComskipSegments.ProgramStart;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
@@ -63,7 +65,16 @@ public sealed class ComskipSegmentProvider : IMediaSegmentProvider
         _programStarts = programStarts;
     }
 
-    public string Name => "Comskip Commercial Segments";
+    public const string ProviderName = "Comskip Commercial Segments";
+
+    /// <summary>
+    /// What Jellyfin files this provider's rows under: the derivation MediaSegmentManager
+    /// applies to <see cref="Name"/>. <see cref="LiveSegmentPublisher"/> writes its rows
+    /// with it, so the live rows and the final ones are one provider's to Jellyfin.
+    /// </summary>
+    public static readonly string ProviderId = ProviderName.ToLowerInvariant().GetMD5().ToString("N", CultureInfo.InvariantCulture);
+
+    public string Name => ProviderName;
 
     public ValueTask<bool> Supports(BaseItem item)
     {

@@ -26,6 +26,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Web.WebOverlayPatcher>();
         serviceCollection.AddSingleton<LiveScanCoordinator>();
         serviceCollection.AddHostedService<LiveScanStarter>();
+        serviceCollection.AddHostedService<LiveSegmentPublisher>();
 
         serviceCollection.AddSingleton<AudioChannelScanner>();
         serviceCollection.AddSingleton<Editing.TrimBackups>();

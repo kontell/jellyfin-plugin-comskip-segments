@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -52,6 +53,9 @@ public sealed class LiveScanCoordinator : IDisposable
 
     /// <summary>True if a live job is already tracked for this path.</summary>
     public bool IsTracking(string path) => _jobs.ContainsKey(Normalize(path));
+
+    /// <summary>The recording paths with a live job tracked right now.</summary>
+    public IReadOnlyList<string> TrackedPaths() => _jobs.Keys.ToList();
 
     /// <summary>
     /// Launch a live-tuned Comskip process against <paramref name="mediaPath"/> and
