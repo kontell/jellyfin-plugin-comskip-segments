@@ -594,7 +594,12 @@ public sealed class DetectionManager : BackgroundService
         // LiveScanCoordinator's 12-hour stale ceiling. Its result IS discarded in that
         // case: the live process tailed the ORIGINAL, pre-trim bytes, so its EDL's
         // offsets no longer line up with the file now sitting at this path.
-        var harvestedEdlPath = _liveScanCoordinator.TryHarvest(item.Path);
+        string? harvestedEdlPath;
+        using (await _liveScanCoordinator.LockPublishAsync().ConfigureAwait(false))
+        {
+            harvestedEdlPath = _liveScanCoordinator.TryHarvest(item.Path);
+        }
+
         if (audioTrimApplied && harvestedEdlPath is not null)
         {
             _logger.LogInformation("Discarding live-harvested EDL for {Path}: audio-trim shifted the timeline, forcing a fresh scan", item.Path);
