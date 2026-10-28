@@ -45,6 +45,19 @@ public sealed class LiveScanCoordinator : IDisposable
     /// </summary>
     private static readonly TimeSpan MaxJobAge = TimeSpan.FromHours(12);
 
+    /// <summary>
+    /// How many times a live job that exited on its own is started again while its
+    /// recording is still growing. Comskip's live mode gives up after live_tv_retries
+    /// pauses in the writer's pacing (see the class remarks); without a restart the
+    /// breaks stored so far would freeze and the rest of the recording would get none
+    /// until the full scan at the end. A restarted process re-reads the file from the
+    /// start, at full speed, and its .edl covers everything once it has caught up.
+    /// </summary>
+    private const int MaxRestarts = 2;
+
+    /// <summary>A file written to this recently is still being recorded.</summary>
+    private static readonly TimeSpan StillGrowingWindow = TimeSpan.FromSeconds(90);
+
     private readonly ILogger<LiveScanCoordinator> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
@@ -62,6 +75,9 @@ public sealed class LiveScanCoordinator : IDisposable
     /// start tracking it. No-op if one is already tracked for this path.
     /// </summary>
     public void Start(string comskipPath, string iniPath, string workDir, string mediaPath)
+        => Launch(comskipPath, iniPath, workDir, mediaPath, restarts: 0);
+
+    private void Launch(string comskipPath, string iniPath, string workDir, string mediaPath, int restarts)
     {
         if (_disposed)
         {
@@ -111,7 +127,7 @@ public sealed class LiveScanCoordinator : IDisposable
 
             var baseName = Path.GetFileNameWithoutExtension(mediaPath);
             var edlPath = Path.Combine(workDir, baseName + ".edl");
-            var job = new LiveJob(process, edlPath, DateTime.UtcNow, log);
+            var job = new LiveJob(process, edlPath, DateTime.UtcNow, log, comskipPath, iniPath, workDir, restarts);
 
             if (!_jobs.TryAdd(key, job))
             {
@@ -121,7 +137,14 @@ public sealed class LiveScanCoordinator : IDisposable
                 return;
             }
 
-            _logger.LogInformation("Started live Comskip scan for in-progress recording {Path}", mediaPath);
+            if (restarts == 0)
+            {
+                _logger.LogInformation("Started live Comskip scan for in-progress recording {Path}", mediaPath);
+            }
+            else
+            {
+                _logger.LogInformation("Restarted live Comskip scan for in-progress recording {Path} ({Restart} of {Max})", mediaPath, restarts, MaxRestarts);
+            }
         }
         catch (Exception ex)
         {
@@ -298,6 +321,10 @@ public sealed class LiveScanCoordinator : IDisposable
                 {
                     LogSelfExit(path, job);
                     job.Process.Dispose();
+                    if (job.Restarts < MaxRestarts && IsStillGrowing(path))
+                    {
+                        Launch(job.ComskipPath, job.IniPath, job.WorkDir, path, job.Restarts + 1);
+                    }
                 }
 
                 continue;
@@ -332,11 +359,13 @@ public sealed class LiveScanCoordinator : IDisposable
         _logger.LogWarning(
             "Live Comskip scan for {Path} exited on its own (exit code {ExitCode}) before the recording "
             + "finished, well short of a full pass — likely comskip.ini's live_tv_retries giving up on a "
-            + "pause in the recording writer. Discarding its partial result and falling back to a full scan "
-            + "once the recording settles; consider raising live_tv_retries if this recurs.\n"
+            + "pause in the recording writer. Its partial result is discarded: it is started again while "
+            + "the recording is still growing (up to {Max} times), and the full scan once the recording "
+            + "settles is the final word either way; consider raising live_tv_retries if this recurs.\n"
             + "--- Comskip output (tail) ---\n{Output}",
             mediaPath,
             exitCode,
+            MaxRestarts,
             Tail(job.Log.ToString(), 20));
     }
 
@@ -353,6 +382,18 @@ public sealed class LiveScanCoordinator : IDisposable
     }
 
     private static string Normalize(string path) => path.Trim();
+
+    private static bool IsStillGrowing(string path)
+    {
+        try
+        {
+            return File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < StillGrowingWindow;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private void TryKill(Process p)
     {
@@ -388,5 +429,13 @@ public sealed class LiveScanCoordinator : IDisposable
         _jobs.Clear();
     }
 
-    private sealed record LiveJob(Process Process, string EdlPath, DateTime StartedUtc, OutputTail Log);
+    private sealed record LiveJob(
+        Process Process,
+        string EdlPath,
+        DateTime StartedUtc,
+        OutputTail Log,
+        string ComskipPath,
+        string IniPath,
+        string WorkDir,
+        int Restarts);
 }
