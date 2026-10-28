@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ComskipSegments.Comskip;
 using Microsoft.Extensions.Logging;
 
@@ -13,27 +14,21 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 /// <summary>
 /// Tracks the live, still-running Comskip processes started by
 /// <see cref="LiveScanStarter"/> against recordings that are still being written, keyed
-/// by recording path. <see cref="TryHarvest"/> is how <see cref="DetectionManager"/>
-/// collects the result once a recording settles, instead of running a fresh full-file
-/// scan.
+/// by recording path, and owns what each of them has found so far
+/// (<see cref="GetLiveBreaks"/>): the one answer the segment provider, the guide badges
+/// and <c>/ComskipSegments/Live</c> all give. <see cref="TryHarvest"/> is how
+/// <see cref="DetectionManager"/> collects the result once a recording settles, instead
+/// of running a fresh full-file scan.
 ///
 /// A live job is launched exactly like <see cref="Comskip.ComskipRunner"/> launches a
 /// normal one (same args, same work dir, same output-file naming), except it is never
 /// awaited to completion — the intent is that Comskip's own <c>live_tv=1</c> mode tails a
 /// growing file and only exits when the process is killed, flushing a valid,
 /// continuously-updated partial .edl to disk the whole time (confirmed in testing:
-/// readable even after a hard kill).
-///
-/// That partial .edl is Comskip's live list, which clusters black frames only: on a
-/// broadcast whose breaks have no black frames (UK sports feeds, for one) it reports
-/// almost nothing until the final pass. A Comskip built with the
-/// <c>live_master_interval</c> change (github.com/kontell/Comskip, branch comseg) also
-/// runs its full analysis every N seconds of content in a forked child and writes it to
-/// <c>&lt;base&gt;.master.edl</c> beside the live list. When that file exists it is the
-/// live result here: every break the full analysis finds, with provisional ends while a
-/// break is still on air. A job that produced one is not harvested as the final result,
-/// because its last pass is up to N seconds stale and ends inside a break on air are
-/// provisional; the full scan after the recording settles is the final word.
+/// readable even after a hard kill). Comskip rewrites that file from scratch
+/// (<c>"wb"</c>) every so many seconds of media, so a read can catch it empty or cut
+/// short; a read counts only when the file was unchanged across it, and an empty one
+/// never replaces a list that had breaks.
 ///
 /// In practice, confirmed live against a real recording, Comskip can also exit ON ITS OWN
 /// well before the recording finishes — observed exiting after ~2 minutes of a 21-minute
@@ -45,7 +40,11 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 /// .edl to a caller first checks whether the process is still alive: still running means
 /// we killed it ourselves because the recording actually settled (the intended path,
 /// trustworthy); already exited on its own means the partial is unreliable and is
-/// discarded, falling back to a full-file scan instead.
+/// discarded, falling back to a full-file scan instead. While the recording is still in
+/// progress a self-exited job is dropped and the starter brings it back on its next
+/// pass, up to <see cref="MaxRestarts"/> times per recording; the restarted process
+/// re-reads the file from the start, so until it has caught up its list is a prefix,
+/// and breaks already known beyond that prefix are kept rather than withdrawn.
 /// </summary>
 public sealed class LiveScanCoordinator : IDisposable
 {
@@ -57,20 +56,26 @@ public sealed class LiveScanCoordinator : IDisposable
     private static readonly TimeSpan MaxJobAge = TimeSpan.FromHours(12);
 
     /// <summary>
-    /// How many times a live job that exited on its own is started again while its
-    /// recording is still growing. Comskip's live mode gives up after live_tv_retries
-    /// pauses in the writer's pacing (see the class remarks); without a restart the
-    /// breaks stored so far would freeze and the rest of the recording would get none
-    /// until the full scan at the end. A restarted process re-reads the file from the
-    /// start, at full speed, and its .edl covers everything once it has caught up.
+    /// How many times a live job that exited on its own is started again for the same
+    /// recording. Counted on the path, not the job: <see cref="LiveScanStarter"/> starts
+    /// a job for any in-progress recording that is not tracked, which is how a
+    /// self-exited one comes back, so a count on the job would reset with it.
     /// </summary>
     private const int MaxRestarts = 2;
 
-    /// <summary>A file written to this recently is still being recorded.</summary>
-    private static readonly TimeSpan StillGrowingWindow = TimeSpan.FromSeconds(90);
+    // A live scan must have read at least this much of the recording for its list to be
+    // the whole picture: at harvest to be trusted, and while recording to be allowed to
+    // withdraw breaks already known (a restarted process starts from the beginning).
+    private const double MinHarvestProgress = 0.97;
 
     private readonly ILogger<LiveScanCoordinator> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _restarts = new(StringComparer.OrdinalIgnoreCase);
+
+    // Orders the live publishes and the harvest: a publish in flight finishes before
+    // the harvest drops the job, and none starts after (the publisher re-checks
+    // IsTracking under it), so a live list can never land on top of the final result.
+    private readonly SemaphoreSlim _publishGate = new(1, 1);
     private bool _disposed;
 
     public LiveScanCoordinator(ILogger<LiveScanCoordinator> logger) => _logger = logger;
@@ -83,12 +88,10 @@ public sealed class LiveScanCoordinator : IDisposable
 
     /// <summary>
     /// Launch a live-tuned Comskip process against <paramref name="mediaPath"/> and
-    /// start tracking it. No-op if one is already tracked for this path.
+    /// start tracking it. No-op if one is already tracked for this path, or if the
+    /// recording has used up its restarts (see class remarks).
     /// </summary>
     public void Start(string comskipPath, string iniPath, string workDir, string mediaPath)
-        => Launch(comskipPath, iniPath, workDir, mediaPath, restarts: 0);
-
-    private void Launch(string comskipPath, string iniPath, string workDir, string mediaPath, int restarts)
     {
         if (_disposed)
         {
@@ -99,6 +102,12 @@ public sealed class LiveScanCoordinator : IDisposable
         if (_jobs.ContainsKey(key))
         {
             return;
+        }
+
+        var restarts = _restarts.GetValueOrDefault(key);
+        if (restarts > MaxRestarts)
+        {
+            return; // gave up on this recording; said so when the count ran out
         }
 
         comskipPath = comskipPath.Trim();
@@ -138,8 +147,7 @@ public sealed class LiveScanCoordinator : IDisposable
 
             var baseName = Path.GetFileNameWithoutExtension(mediaPath);
             var edlPath = Path.Combine(workDir, baseName + ".edl");
-            var masterEdlPath = Path.Combine(workDir, baseName + ".master.edl");
-            var job = new LiveJob(process, edlPath, masterEdlPath, DateTime.UtcNow, log, comskipPath, iniPath, workDir, restarts);
+            var job = new LiveJob(process, edlPath, DateTime.UtcNow, log);
 
             if (!_jobs.TryAdd(key, job))
             {
@@ -165,19 +173,14 @@ public sealed class LiveScanCoordinator : IDisposable
     }
 
     /// <summary>
-    /// Stop tracking the live job for <paramref name="mediaPath"/> (if any) and return the
-    /// .edl it already produced. Returns null — caller falls back to a normal full-file
-    /// Comskip run — if no live job was tracked for this path, it never produced an .edl,
-    /// or (see class remarks) it had already exited on its own, which makes its partial
-    /// .edl unreliable rather than a trustworthy stand-in for the whole recording.
+    /// The commercial breaks the live job for <paramref name="mediaPath"/> has found so
+    /// far, in order, with the configured padding applied. Null when no live job tracks
+    /// this path, its process already gave up (see class remarks), or it has nothing to
+    /// say yet. A read that caught Comskip mid-rewrite, or an empty one after a list that
+    /// had breaks, returns the previous answer; while a restarted process is still
+    /// catching up, breaks it has not reached yet are kept from the previous answer.
     /// </summary>
-    /// <summary>
-    /// The .edl a live job is writing for a recording still in progress, for showing and
-    /// storing "commercials found so far": the periodic full analysis when the Comskip in
-    /// use writes one (see class remarks), else the live list. Null when no live job
-    /// tracks this path, its process already gave up, or it hasn't written anything yet.
-    /// </summary>
-    public string? GetLiveEdl(string mediaPath)
+    public IReadOnlyList<CommercialBreak>? GetLiveBreaks(string mediaPath)
     {
         if (!_jobs.TryGetValue(Normalize(mediaPath), out var job))
         {
@@ -190,26 +193,46 @@ public sealed class LiveScanCoordinator : IDisposable
             {
                 return null;
             }
-
-            if (File.Exists(job.MasterEdlPath))
-            {
-                return job.MasterEdlPath;
-            }
-
-            return File.Exists(job.EdlPath) ? job.EdlPath : null;
         }
         catch (InvalidOperationException)
         {
             return null;
         }
+
+        if (!TryReadStable(job.EdlPath, out var text))
+        {
+            return job.LastBreaks;
+        }
+
+        var padding = Plugin.Instance?.Configuration.PaddingSeconds ?? 0;
+        var pass = EdlParser.ParseLines(text.Split('\n'), padding);
+        if (pass.Count == 0 && job.LastBreaks is { Count: > 0 })
+        {
+            return job.LastBreaks; // Comskip's live list only ever grows: an empty read is a truncated one
+        }
+
+        IReadOnlyList<CommercialBreak> result = pass;
+        if (job.LastBreaks is { Count: > 0 } last && ReadProgress(job.Process.Id, mediaPath) is < MinHarvestProgress)
+        {
+            // Catching up after a restart: this list is a prefix of what the previous
+            // process had seen. Keep the breaks beyond where it has reached.
+            var reach = pass.Count > 0 ? pass[^1].StartTicks : -1;
+            result = pass.Concat(last.Where(b => b.StartTicks > reach)).OrderBy(b => b.StartTicks).ToList();
+        }
+
+        job.LastBreaks = result;
+        return result;
     }
 
-    /// <summary>True for the periodic full analysis a live job writes, as opposed to its live list.</summary>
-    public static bool IsPeriodicAnalysis(string edlPath)
-        => edlPath.EndsWith(".master.edl", StringComparison.OrdinalIgnoreCase);
-
-    // A live scan must have read at least this much of the finished recording to be trusted.
-    private const double MinHarvestProgress = 0.97;
+    /// <summary>
+    /// Hold this around a live publish, and around <see cref="TryHarvest"/>, so neither
+    /// overlaps the other; re-check <see cref="IsTracking"/> inside it before publishing.
+    /// </summary>
+    public async Task<IDisposable> LockPublishAsync()
+    {
+        await _publishGate.WaitAsync().ConfigureAwait(false);
+        return new Releaser(_publishGate);
+    }
 
     /// <summary>
     /// How far (0-1) the live Comskip process has read into the recording, from the kernel's
@@ -251,6 +274,32 @@ public sealed class LiveScanCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reads a file Comskip may be rewriting at this instant: the read counts only when
+    /// the file's size and write time were the same before and after it.
+    /// </summary>
+    private static bool TryReadStable(string path, out string text)
+    {
+        text = string.Empty;
+        try
+        {
+            var before = new FileInfo(path);
+            if (!before.Exists)
+            {
+                return false;
+            }
+
+            var (length, written) = (before.Length, before.LastWriteTimeUtc);
+            text = File.ReadAllText(path);
+            var after = new FileInfo(path);
+            return after.Exists && after.Length == length && after.LastWriteTimeUtc == written;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static bool HasAnyBreak(string edlPath)
     {
         try
@@ -263,9 +312,19 @@ public sealed class LiveScanCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Stop tracking the live job for <paramref name="mediaPath"/> (if any) and return the
+    /// .edl it already produced. Returns null — caller falls back to a normal full-file
+    /// Comskip run — if no live job was tracked for this path, it never produced an .edl,
+    /// or (see class remarks) it had already exited on its own, which makes its partial
+    /// .edl unreliable rather than a trustworthy stand-in for the whole recording. Hold
+    /// <see cref="LockPublishAsync"/> around the call.
+    /// </summary>
     public string? TryHarvest(string mediaPath)
     {
-        if (!_jobs.TryRemove(Normalize(mediaPath), out var job))
+        var key = Normalize(mediaPath);
+        _restarts.TryRemove(key, out _);
+        if (!_jobs.TryRemove(key, out var job))
         {
             return null;
         }
@@ -286,17 +345,7 @@ public sealed class LiveScanCoordinator : IDisposable
 
         if (selfExited)
         {
-            LogSelfExit(mediaPath, job);
-            return null;
-        }
-
-        if (File.Exists(job.MasterEdlPath))
-        {
-            // The periodic analysis served the recording while it was in progress; its
-            // last pass is not the final word (see class remarks), the full scan is.
-            _logger.LogInformation(
-                "Live Comskip scan for {Path} ran the periodic full analysis while recording; running a full scan for the final result",
-                mediaPath);
+            LogSelfExit(mediaPath, job, restarting: false);
             return null;
         }
 
@@ -329,8 +378,10 @@ public sealed class LiveScanCoordinator : IDisposable
     }
 
     /// <summary>
-    /// Kill and drop any tracked job whose process has already exited on its own (see
-    /// class remarks), whose source file is gone, or that's run past a sanity ceiling.
+    /// Drop any tracked job whose process has already exited on its own (see class
+    /// remarks; the starter brings it back while the recording is in progress, up to
+    /// <see cref="MaxRestarts"/> times), and kill and drop one whose source file is
+    /// gone or that's run past a sanity ceiling.
     /// </summary>
     public void PruneStale()
     {
@@ -356,12 +407,9 @@ public sealed class LiveScanCoordinator : IDisposable
             {
                 if (_jobs.TryRemove(path, out _))
                 {
-                    LogSelfExit(path, job);
+                    var restarts = _restarts.AddOrUpdate(path, 1, (_, count) => count + 1);
+                    LogSelfExit(path, job, restarting: restarts <= MaxRestarts);
                     job.Process.Dispose();
-                    if (job.Restarts < MaxRestarts && IsStillGrowing(path))
-                    {
-                        Launch(job.ComskipPath, job.IniPath, job.WorkDir, path, job.Restarts + 1);
-                    }
                 }
 
                 continue;
@@ -375,6 +423,7 @@ public sealed class LiveScanCoordinator : IDisposable
 
             if (_jobs.TryRemove(path, out _))
             {
+                _restarts.TryRemove(path, out _);
                 _logger.LogWarning("Abandoning stale live Comskip scan for {Path}", path);
                 TryKill(job.Process);
                 job.Process.Dispose();
@@ -382,7 +431,7 @@ public sealed class LiveScanCoordinator : IDisposable
         }
     }
 
-    private void LogSelfExit(string mediaPath, LiveJob job)
+    private void LogSelfExit(string mediaPath, LiveJob job, bool restarting)
     {
         int? exitCode = null;
         try
@@ -396,13 +445,14 @@ public sealed class LiveScanCoordinator : IDisposable
         _logger.LogWarning(
             "Live Comskip scan for {Path} exited on its own (exit code {ExitCode}) before the recording "
             + "finished, well short of a full pass — likely comskip.ini's live_tv_retries giving up on a "
-            + "pause in the recording writer. Its partial result is discarded: it is started again while "
-            + "the recording is still growing (up to {Max} times), and the full scan once the recording "
-            + "settles is the final word either way; consider raising live_tv_retries if this recurs.\n"
+            + "pause in the recording writer. Its partial result is discarded; {Next} The full scan once "
+            + "the recording settles is the final word either way; consider raising live_tv_retries if this recurs.\n"
             + "--- Comskip output (tail) ---\n{Output}",
             mediaPath,
             exitCode,
-            MaxRestarts,
+            restarting
+                ? "it is started again while the recording is still in progress."
+                : $"it has been restarted {MaxRestarts} times already, so live detection stops for this recording.",
             Tail(job.Log.ToString(), 20));
     }
 
@@ -419,18 +469,6 @@ public sealed class LiveScanCoordinator : IDisposable
     }
 
     private static string Normalize(string path) => path.Trim();
-
-    private static bool IsStillGrowing(string path)
-    {
-        try
-        {
-            return File.Exists(path) && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < StillGrowingWindow;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
 
     private void TryKill(Process p)
     {
@@ -464,16 +502,21 @@ public sealed class LiveScanCoordinator : IDisposable
         }
 
         _jobs.Clear();
+        _restarts.Clear();
     }
 
-    private sealed record LiveJob(
-        Process Process,
-        string EdlPath,
-        string MasterEdlPath,
-        DateTime StartedUtc,
-        OutputTail Log,
-        string ComskipPath,
-        string IniPath,
-        string WorkDir,
-        int Restarts);
+    private sealed class Releaser : IDisposable
+    {
+        private readonly SemaphoreSlim _gate;
+
+        public Releaser(SemaphoreSlim gate) => _gate = gate;
+
+        public void Dispose() => _gate.Release();
+    }
+
+    private sealed record LiveJob(Process Process, string EdlPath, DateTime StartedUtc, OutputTail Log)
+    {
+        /// <summary>The last answer given for this job, so a bad read or a catch-up prefix never shrinks it.</summary>
+        public IReadOnlyList<CommercialBreak>? LastBreaks { get; set; }
+    }
 }
