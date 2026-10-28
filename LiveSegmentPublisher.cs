@@ -172,9 +172,10 @@ public sealed class LiveSegmentPublisher : BackgroundService
     {
         var options = library.GetLibraryOptions(item);
         var unchanged = _published.TryGetValue(path, out var last) && last.SequenceEqual(breaks);
-        if (unchanged && breaks.Count == 0)
+        if (breaks.Count == 0 && (unchanged || last is null))
         {
-            return;
+            _published[path] = breaks;
+            return; // nothing to store, and nothing stored before to take back
         }
 
         if (unchanged)
