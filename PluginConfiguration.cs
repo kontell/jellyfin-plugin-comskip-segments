@@ -58,7 +58,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// needs <c>live_tv=1</c> and <c>output_edl=1</c> set in the configured comskip.ini
     /// (the latter is already required for normal detection to work at all) — without
     /// <c>live_tv=1</c>, Comskip may exit early or misbehave against a file that's still
-    /// growing. Trade-off: because the live process is killed (not gracefully stopped)
+    /// growing. Comskip's own live list only finds breaks that contain black frames; a
+    /// Comskip built with the <c>live_master_interval</c> change (github.com/kontell/Comskip,
+    /// branch comseg) also runs its full analysis every so many seconds of content, which
+    /// finds the rest (see <see cref="Detection.LiveScanCoordinator"/>); the plugin's
+    /// default ini sets that key, and stock Comskip ignores it.
+    /// Trade-off: because the live process is killed (not gracefully stopped)
     /// once the recording settles, its analysis may trail the true end of the recording
     /// by a few seconds, so a break right at the very end could be missed; this is the
     /// same reason live TV playback itself can never show marks in real time (see

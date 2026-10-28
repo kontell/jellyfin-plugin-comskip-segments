@@ -46,6 +46,13 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 ///    are replaced (the store has create and delete only), rows no break accounts for
 ///    go.
 ///
+/// When the Comskip in use writes the periodic full analysis (see
+/// <see cref="LiveScanCoordinator"/>), each new pass goes through a
+/// <see cref="LiveBreakTracker"/> first: a break is stored once two consecutive passes
+/// report it, its end follows the latest pass, and it is withdrawn only after two passes
+/// without it, which drops the one-pass false breaks a full analysis of a growing file
+/// produces. The live list, which only ever adds, is stored as it is.
+///
 /// The rows carry this plugin's provider id, so the publish that follows the harvest
 /// (<see cref="DetectionManager"/> re-running the providers with overwrite) replaces
 /// them in one go rather than leaving duplicates behind. Players must re-fetch an
@@ -55,6 +62,9 @@ public sealed class LiveSegmentPublisher : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan RefreshRequestInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>Consecutive periodic passes a break must appear in before it is stored.</summary>
+    private const int ConfirmPasses = 2;
 
     /// <summary>A row whose start is this close to a break's is that break's row.</summary>
     private const long StartToleranceTicks = (long)(1.5 * TimeSpan.TicksPerSecond);
@@ -69,6 +79,10 @@ public sealed class LiveSegmentPublisher : BackgroundService
     // Per recording path: when a library refresh was last asked for, so the request is
     // not repeated every poll while the item takes its time to appear.
     private readonly ConcurrentDictionary<string, DateTime> _refreshRequested = new(StringComparer.Ordinal);
+
+    // Per recording path, while its live job writes the periodic analysis: the tracker
+    // the passes feed, and when the pass it last saw was written.
+    private readonly ConcurrentDictionary<string, Analysis> _analyses = new(StringComparer.Ordinal);
 
     public LiveSegmentPublisher(
         ILogger<LiveSegmentPublisher> logger,
@@ -115,9 +129,10 @@ public sealed class LiveSegmentPublisher : BackgroundService
     private async Task PollOnceAsync(PluginConfiguration cfg, CancellationToken cancellationToken)
     {
         var paths = _coordinator.TrackedPaths();
-        foreach (var gone in _refreshRequested.Keys.Where(p => !paths.Contains(p, StringComparer.Ordinal)).ToList())
+        foreach (var gone in _refreshRequested.Keys.Concat(_analyses.Keys).Distinct().Where(p => !paths.Contains(p, StringComparer.Ordinal)).ToList())
         {
             _refreshRequested.TryRemove(gone, out _);
+            _analyses.TryRemove(gone, out _);
         }
 
         if (paths.Count == 0)
@@ -147,7 +162,9 @@ public sealed class LiveSegmentPublisher : BackgroundService
             IReadOnlyList<CommercialBreak> breaks;
             try
             {
-                breaks = EdlParser.Parse(edl, cfg.PaddingSeconds);
+                breaks = LiveScanCoordinator.IsPeriodicAnalysis(edl)
+                    ? ConfirmedBreaks(path, edl, cfg)
+                    : EdlParser.Parse(edl, cfg.PaddingSeconds);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -173,6 +190,31 @@ public sealed class LiveSegmentPublisher : BackgroundService
                 _logger.LogWarning(ex, "Could not store the live breaks for {Path}", path);
             }
         }
+    }
+
+    /// <summary>
+    /// The breaks worth storing from the periodic analysis: a new pass (the file was
+    /// written since the last one seen) is fed to the path's tracker; otherwise the
+    /// tracker's current answer stands, so a poll between passes still reconciles rows
+    /// Jellyfin may have pruned.
+    /// </summary>
+    private IReadOnlyList<CommercialBreak> ConfirmedBreaks(string path, string edl, PluginConfiguration cfg)
+    {
+        var analysis = _analyses.GetOrAdd(path, _ => new Analysis(new LiveBreakTracker(ConfirmPasses)));
+        var written = File.GetLastWriteTimeUtc(edl);
+        if (written != analysis.LastPassUtc)
+        {
+            var pass = EdlParser.Parse(edl, cfg.PaddingSeconds);
+            analysis.LastPassUtc = written;
+            if (analysis.Tracker.Observe(pass))
+            {
+                _logger.LogDebug(
+                    "Periodic analysis {Pass} of {Path}: {Reported} break(s) reported, {Confirmed} confirmed",
+                    analysis.Tracker.Passes, path, pass.Count, analysis.Tracker.Confirmed.Count);
+            }
+        }
+
+        return analysis.Tracker.Confirmed;
     }
 
     /// <summary>
@@ -280,6 +322,15 @@ public sealed class LiveSegmentPublisher : BackgroundService
                 RefreshPaths = new[] { path, dir, parent }
             },
             RefreshPriority.High);
+    }
+
+    private sealed class Analysis
+    {
+        public Analysis(LiveBreakTracker tracker) => Tracker = tracker;
+
+        public LiveBreakTracker Tracker { get; }
+
+        public DateTime LastPassUtc { get; set; }
     }
 
     private static bool IsUnder(string path, string root)

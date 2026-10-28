@@ -24,6 +24,17 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 /// continuously-updated partial .edl to disk the whole time (confirmed in testing:
 /// readable even after a hard kill).
 ///
+/// That partial .edl is Comskip's live list, which clusters black frames only: on a
+/// broadcast whose breaks have no black frames (UK sports feeds, for one) it reports
+/// almost nothing until the final pass. A Comskip built with the
+/// <c>live_master_interval</c> change (github.com/kontell/Comskip, branch comseg) also
+/// runs its full analysis every N seconds of content in a forked child and writes it to
+/// <c>&lt;base&gt;.master.edl</c> beside the live list. When that file exists it is the
+/// live result here: every break the full analysis finds, with provisional ends while a
+/// break is still on air. A job that produced one is not harvested as the final result,
+/// because its last pass is up to N seconds stale and ends inside a break on air are
+/// provisional; the full scan after the recording settles is the final word.
+///
 /// In practice, confirmed live against a real recording, Comskip can also exit ON ITS OWN
 /// well before the recording finishes — observed exiting after ~2 minutes of a 21-minute
 /// recording, apparently hitting comskip.ini's <c>live_tv_retries</c> limit on a pause in
@@ -127,7 +138,8 @@ public sealed class LiveScanCoordinator : IDisposable
 
             var baseName = Path.GetFileNameWithoutExtension(mediaPath);
             var edlPath = Path.Combine(workDir, baseName + ".edl");
-            var job = new LiveJob(process, edlPath, DateTime.UtcNow, log, comskipPath, iniPath, workDir, restarts);
+            var masterEdlPath = Path.Combine(workDir, baseName + ".master.edl");
+            var job = new LiveJob(process, edlPath, masterEdlPath, DateTime.UtcNow, log, comskipPath, iniPath, workDir, restarts);
 
             if (!_jobs.TryAdd(key, job))
             {
@@ -160,9 +172,10 @@ public sealed class LiveScanCoordinator : IDisposable
     /// .edl unreliable rather than a trustworthy stand-in for the whole recording.
     /// </summary>
     /// <summary>
-    /// The partial .edl a live job is writing for a recording still in progress, for
-    /// showing "commercials found so far". Null when no live job tracks this path, its
-    /// process already gave up (see class remarks), or it hasn't written anything yet.
+    /// The .edl a live job is writing for a recording still in progress, for showing and
+    /// storing "commercials found so far": the periodic full analysis when the Comskip in
+    /// use writes one (see class remarks), else the live list. Null when no live job
+    /// tracks this path, its process already gave up, or it hasn't written anything yet.
     /// </summary>
     public string? GetLiveEdl(string mediaPath)
     {
@@ -173,13 +186,27 @@ public sealed class LiveScanCoordinator : IDisposable
 
         try
         {
-            return !job.Process.HasExited && File.Exists(job.EdlPath) ? job.EdlPath : null;
+            if (job.Process.HasExited)
+            {
+                return null;
+            }
+
+            if (File.Exists(job.MasterEdlPath))
+            {
+                return job.MasterEdlPath;
+            }
+
+            return File.Exists(job.EdlPath) ? job.EdlPath : null;
         }
         catch (InvalidOperationException)
         {
             return null;
         }
     }
+
+    /// <summary>True for the periodic full analysis a live job writes, as opposed to its live list.</summary>
+    public static bool IsPeriodicAnalysis(string edlPath)
+        => edlPath.EndsWith(".master.edl", StringComparison.OrdinalIgnoreCase);
 
     // A live scan must have read at least this much of the finished recording to be trusted.
     private const double MinHarvestProgress = 0.97;
@@ -260,6 +287,16 @@ public sealed class LiveScanCoordinator : IDisposable
         if (selfExited)
         {
             LogSelfExit(mediaPath, job);
+            return null;
+        }
+
+        if (File.Exists(job.MasterEdlPath))
+        {
+            // The periodic analysis served the recording while it was in progress; its
+            // last pass is not the final word (see class remarks), the full scan is.
+            _logger.LogInformation(
+                "Live Comskip scan for {Path} ran the periodic full analysis while recording; running a full scan for the final result",
+                mediaPath);
             return null;
         }
 
@@ -432,6 +469,7 @@ public sealed class LiveScanCoordinator : IDisposable
     private sealed record LiveJob(
         Process Process,
         string EdlPath,
+        string MasterEdlPath,
         DateTime StartedUtc,
         OutputTail Log,
         string ComskipPath,
