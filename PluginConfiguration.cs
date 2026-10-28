@@ -58,12 +58,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// needs <c>live_tv=1</c> and <c>output_edl=1</c> set in the configured comskip.ini
     /// (the latter is already required for normal detection to work at all) — without
     /// <c>live_tv=1</c>, Comskip may exit early or misbehave against a file that's still
-    /// growing. Comskip's own live list only finds breaks that contain black frames; a
-    /// Comskip built with the <c>live_master_interval</c> change (github.com/kontell/Comskip,
-    /// branch comseg) also runs its full analysis every so many seconds of content, which
-    /// finds the rest (see <see cref="Detection.LiveScanCoordinator"/>); the plugin's
-    /// default ini sets that key, and stock Comskip ignores it.
-    /// Trade-off: because the live process is killed (not gracefully stopped)
+    /// growing. Trade-off: because the live process is killed (not gracefully stopped)
     /// once the recording settles, its analysis may trail the true end of the recording
     /// by a few seconds, so a break right at the very end could be missed; this is the
     /// same reason live TV playback itself can never show marks in real time (see
@@ -81,6 +76,16 @@ public class PluginConfiguration : BasePluginConfiguration
     /// live scan whose findings nobody can use until the end is only a faster post-scan.
     /// </summary>
     public bool PublishLiveSegments { get; set; } = true;
+
+    /// <summary>
+    /// Seconds of content between the full analyses a live scan runs while recording, or
+    /// 0 for none. Comskip's own live list only finds breaks that contain black frames; a
+    /// Comskip built with the <c>live_master_interval</c> change (github.com/kontell/Comskip,
+    /// branch comseg) also runs its full analysis this often, which finds the rest (see
+    /// <see cref="Detection.LiveScanCoordinator"/>). The key is given to the live process
+    /// alone, in a copy of the ini; stock Comskip ignores it.
+    /// </summary>
+    public int LiveAnalysisIntervalSeconds { get; set; } = 60;
 
     /// <summary>
     /// How often, in hours, the "Scan library for commercials (Comskip)" task runs on

@@ -43,10 +43,16 @@ public sealed class LiveBreakTracker
     /// <summary>How many passes have been observed.</summary>
     public int Passes { get; private set; }
 
-    /// <summary>Feeds one pass. Returns true when <see cref="Confirmed"/> changed.</summary>
-    public bool Observe(IReadOnlyList<CommercialBreak> pass)
+    /// <summary>
+    /// Feeds one pass. Returns true when <see cref="Confirmed"/> changed. With
+    /// <paramref name="catchingUp"/> the pass covers only a prefix of the recording (a
+    /// restarted process re-reading from the start), so a candidate beyond the last
+    /// break it reports is left as it was rather than counted as missing.
+    /// </summary>
+    public bool Observe(IReadOnlyList<CommercialBreak> pass, bool catchingUp = false)
     {
         Passes++;
+        var reach = catchingUp ? (pass.Count > 0 ? pass.Max(b => b.StartTicks) : long.MinValue) : long.MaxValue;
         var next = new List<Candidate>(pass.Count);
         var matched = new HashSet<Candidate>();
         foreach (var b in pass.OrderBy(b => b.StartTicks))
@@ -66,7 +72,16 @@ public sealed class LiveBreakTracker
         // been absent for as many passes as it took to confirm.
         foreach (var c in _candidates)
         {
-            if (!matched.Contains(c) && c.Seen >= _confirmPasses && c.Missing + 1 < _confirmPasses)
+            if (matched.Contains(c))
+            {
+                continue;
+            }
+
+            if (c.StartTicks > reach)
+            {
+                next.Add(c); // not reached yet by a process still catching up
+            }
+            else if (c.Seen >= _confirmPasses && c.Missing + 1 < _confirmPasses)
             {
                 next.Add(c with { Missing = c.Missing + 1 });
             }
