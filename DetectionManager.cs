@@ -803,7 +803,7 @@ public sealed class DetectionManager : BackgroundService
             return;
         }
 
-        foreach (var ext in new[] { ".edl", ".txt", ".log", ".logo.txt", ".ffmeta" })
+        foreach (var ext in new[] { ".edl", ".txt", ".log", ".logo.txt", ".ffmeta", ".master.edl", ".master.tmp.edl", ".live.ini" })
         {
             try
             {

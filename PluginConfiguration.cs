@@ -78,6 +78,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool PublishLiveSegments { get; set; } = true;
 
     /// <summary>
+    /// Seconds of content between the full analyses a live scan runs while recording, or
+    /// 0 for none. Comskip's own live list only finds breaks that contain black frames; a
+    /// Comskip built with the <c>live_master_interval</c> change (github.com/kontell/Comskip,
+    /// branch comseg) also runs its full analysis this often, which finds the rest (see
+    /// <see cref="Detection.LiveScanCoordinator"/>). The key is given to the live process
+    /// alone, in a copy of the ini; stock Comskip ignores it.
+    /// </summary>
+    public int LiveAnalysisIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
     /// How often, in hours, the "Scan library for commercials (Comskip)" task runs on
     /// its own as a safety net for recordings the live-event watcher misses (Jellyfin
     /// raises ItemUpdated rather than ItemAdded when a recording finishes over an

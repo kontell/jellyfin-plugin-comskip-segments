@@ -22,7 +22,16 @@ wired for Jellyfin's media-segment system.
   written (`LiveSegmentPublisher`), so any client that reads Jellyfin's own segments can
   skip them while catching up on a programme still being recorded, not only the web and
   TV forks that ask `/ComskipSegments/Live`. The final result replaces them once the
-  recording settles.
+  recording settles. Comskip's own live list only finds breaks that contain black
+  frames; a Comskip built with the `live_master_interval` change
+  ([kontell/Comskip](https://github.com/kontell/Comskip), branch `comseg`, on its way
+  upstream) also runs its full analysis every so many seconds of content, one at a
+  time, and writes it to `<base>.master.edl`, which is the answer when it exists: a
+  break is stored once two consecutive passes report it, its end follows the latest
+  pass, it is withdrawn only after two passes without it, and the full scan after the
+  recording settles is the final word. The live scan alone is given the key, through
+  a copy of the ini written for it ("Full analysis every" in the live-scan settings);
+  stock Comskip ignores it.
 - **Read recordings, write a work dir.** Comskip is always invoked with an explicit
   `--output` work directory the service account owns; the read-only recordings folder is
   never written to.

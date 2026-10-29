@@ -115,6 +115,12 @@
                         <span>Store the breaks found so far as segments while the recording is in progress</span>
                     </label>
                     <div class="fieldDescription">Clients that read Jellyfin's own segments can then skip them before the recording finishes; the final result replaces them once it settles.</div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="LiveAnalysisIntervalSeconds">Full analysis every (seconds of content)</label>
+                        <input id="LiveAnalysisIntervalSeconds" name="LiveAnalysisIntervalSeconds" type="number" min="0" max="3600" step="1" class="emby-input" is="emby-input" />
+                        <div class="fieldDescription">Comskip's own live list only finds breaks that contain black frames. A Comskip built from <a href="https://github.com/kontell/Comskip/tree/comseg" target="_blank">github.com/kontell/Comskip</a> (branch comseg) also runs its full analysis this often while recording, which finds the rest; a break counts once two analyses agree on it. 0 turns it off; stock Comskip ignores it.</div>
+                    </div>
                 </div>
 
                 <div class="verticalSection">
@@ -451,6 +457,7 @@
                 page.querySelector("#EnableMediaSegmentScanEnqueue").checked = config.EnableMediaSegmentScanEnqueue !== false;
                 page.querySelector("#EnableLiveScanStart").checked = !!config.EnableLiveScanStart;
                 page.querySelector("#PublishLiveSegments").checked = config.PublishLiveSegments !== false;
+                page.querySelector("#LiveAnalysisIntervalSeconds").value = config.LiveAnalysisIntervalSeconds != null ? config.LiveAnalysisIntervalSeconds : 60;
                 page.querySelector("#SeriesAllowList").value = config.SeriesAllowList || "";
                 page.querySelector("#SeriesBlockList").value = config.SeriesBlockList || "";
                 page.querySelector("#ChannelAllowList").value = config.ChannelAllowList || "";
@@ -761,6 +768,8 @@
                         config.EnableMediaSegmentScanEnqueue = page.querySelector("#EnableMediaSegmentScanEnqueue").checked;
                         config.EnableLiveScanStart = page.querySelector("#EnableLiveScanStart").checked;
                         config.PublishLiveSegments = page.querySelector("#PublishLiveSegments").checked;
+                        var liveInterval = parseInt(page.querySelector("#LiveAnalysisIntervalSeconds").value, 10);
+                        config.LiveAnalysisIntervalSeconds = isNaN(liveInterval) || liveInterval < 0 ? 0 : liveInterval;
                         config.SeriesAllowList = page.querySelector("#SeriesAllowList").value;
                         config.SeriesBlockList = page.querySelector("#SeriesBlockList").value;
                         config.ChannelAllowList = page.querySelector("#ChannelAllowList").value;

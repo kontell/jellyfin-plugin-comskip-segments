@@ -45,6 +45,23 @@ namespace Jellyfin.Plugin.ComskipSegments.Detection;
 /// pass, up to <see cref="MaxRestarts"/> times per recording; the restarted process
 /// re-reads the file from the start, so until it has caught up its list is a prefix,
 /// and breaks already known beyond that prefix are kept rather than withdrawn.
+///
+/// That live list is Comskip's own, which clusters black frames only: on a broadcast
+/// whose breaks have no black frames (UK sports feeds, for one) it reports almost
+/// nothing until the final pass. A Comskip built with the <c>live_master_interval</c>
+/// change (github.com/kontell/Comskip, branch comseg) also runs its full analysis every
+/// N seconds of content, one at a time, in a forked child that writes
+/// <c>&lt;base&gt;.master.edl</c> beside the live list. The live job alone is given that
+/// key, through a copy of the ini written for it, so the finished-file scans never fork.
+/// When a pass written by this job exists it is the answer, after
+/// <see cref="LiveBreakTracker"/>: a break counts once two consecutive passes report it,
+/// its end follows the latest pass while the break is on air, it is withdrawn only after
+/// two passes without it, and breaks under <see cref="MinPeriodicBreakSeconds"/> are left
+/// to the final pass. Nothing is answered until two passes are in, which is what tells
+/// "not confirmed yet" from "confirmed none". A job that wrote passes is not harvested
+/// as the final result, because its last pass is up to N seconds stale and ends inside a
+/// break on air are provisional; the full scan after the recording settles is the final
+/// word. Stock Comskip ignores the key and never writes the file.
 /// </summary>
 public sealed class LiveScanCoordinator : IDisposable
 {
@@ -67,6 +84,22 @@ public sealed class LiveScanCoordinator : IDisposable
     // the whole picture: at harvest to be trusted, and while recording to be allowed to
     // withdraw breaks already known (a restarted process starts from the beginning).
     private const double MinHarvestProgress = 0.97;
+
+    /// <summary>Consecutive periodic passes a break must appear in before it is answered.</summary>
+    private const int ConfirmPasses = 2;
+
+    /// <summary>
+    /// Shortest break answered from the periodic analysis. The final pass applies the
+    /// ini's min_commercialbreak; a pass over a growing file can report shorter ones (a
+    /// 7.8 s "break" at the very start of a recording, seen live, that the final pass
+    /// dropped). The tracker keeps a shorter one as a candidate, so one that grows is
+    /// answered as soon as it is long enough.
+    /// </summary>
+    private const double MinPeriodicBreakSeconds = 20;
+
+    private const string LiveIniSuffix = ".live.ini";
+    private const string MasterEdlSuffix = ".master.edl";
+    private const string MasterTmpEdlSuffix = ".master.tmp.edl";
 
     private readonly ILogger<LiveScanCoordinator> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.OrdinalIgnoreCase);
@@ -117,6 +150,17 @@ public sealed class LiveScanCoordinator : IDisposable
         try
         {
             Directory.CreateDirectory(workDir);
+            var baseName = Path.GetFileNameWithoutExtension(mediaPath);
+
+            // A previous recording with the same base name may have left its passes here,
+            // and they would read as this job's. The work directory is shared and the
+            // normal cleanup never removed them.
+            foreach (var leftover in new[] { Path.Combine(workDir, baseName + MasterEdlSuffix), Path.Combine(workDir, baseName + MasterTmpEdlSuffix) })
+            {
+                File.Delete(leftover);
+            }
+
+            iniPath = LiveIni(iniPath, Path.Combine(workDir, baseName + LiveIniSuffix));
 
             var psi = new ProcessStartInfo
             {
@@ -145,9 +189,8 @@ public sealed class LiveScanCoordinator : IDisposable
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            var baseName = Path.GetFileNameWithoutExtension(mediaPath);
             var edlPath = Path.Combine(workDir, baseName + ".edl");
-            var job = new LiveJob(process, edlPath, DateTime.UtcNow, log);
+            var job = new LiveJob(process, edlPath, Path.Combine(workDir, baseName + MasterEdlSuffix), DateTime.UtcNow, log);
 
             if (!_jobs.TryAdd(key, job))
             {
@@ -179,6 +222,8 @@ public sealed class LiveScanCoordinator : IDisposable
     /// say yet. A read that caught Comskip mid-rewrite, or an empty one after a list that
     /// had breaks, returns the previous answer; while a restarted process is still
     /// catching up, breaks it has not reached yet are kept from the previous answer.
+    /// With a Comskip that writes the periodic full analysis, that is the answer instead,
+    /// confirmed across passes (see class remarks).
     /// </summary>
     public IReadOnlyList<CommercialBreak>? GetLiveBreaks(string mediaPath)
     {
@@ -199,12 +244,25 @@ public sealed class LiveScanCoordinator : IDisposable
             return null;
         }
 
+        var padding = Plugin.Instance?.Configuration.PaddingSeconds ?? 0;
+        if (PeriodicPassWritten(job) is { } written)
+        {
+            if (written > job.LastPassUtc && TryReadStable(job.MasterEdlPath, out var passText))
+            {
+                var catchingUp = ReadProgress(job.Process.Id, mediaPath) is < MinHarvestProgress;
+                job.Tracker ??= new LiveBreakTracker(ConfirmPasses, MinPeriodicBreakSeconds);
+                job.Tracker.Observe(EdlParser.ParseLines(passText.Split('\n'), padding), catchingUp);
+                job.LastPassUtc = written;
+            }
+
+            return job.Tracker is { } tracker && tracker.Passes >= ConfirmPasses ? tracker.Confirmed : null;
+        }
+
         if (!TryReadStable(job.EdlPath, out var text))
         {
             return job.LastBreaks;
         }
 
-        var padding = Plugin.Instance?.Configuration.PaddingSeconds ?? 0;
         var pass = EdlParser.ParseLines(text.Split('\n'), padding);
         if (pass.Count == 0 && job.LastBreaks is { Count: > 0 })
         {
@@ -222,6 +280,49 @@ public sealed class LiveScanCoordinator : IDisposable
 
         job.LastBreaks = result;
         return result;
+    }
+
+    /// <summary>When this job's Comskip has written a periodic pass: its write time; else null. A file older than the job is a leftover.</summary>
+    private static DateTime? PeriodicPassWritten(LiveJob job)
+    {
+        try
+        {
+            var info = new FileInfo(job.MasterEdlPath);
+            return info.Exists && info.LastWriteTimeUtc >= job.StartedUtc ? info.LastWriteTimeUtc : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The ini the live process runs with: the configured one, plus live_master_interval
+    /// when the periodic analysis is wanted, written beside the job's outputs. Only the
+    /// live process gets the key; the finished-file scans keep the configured ini, so a
+    /// Comskip that honours it does not fork passes nobody reads during a full scan.
+    /// </summary>
+    private string LiveIni(string iniPath, string liveIniPath)
+    {
+        var interval = Plugin.Instance?.Configuration.LiveAnalysisIntervalSeconds ?? 0;
+        if (interval <= 0)
+        {
+            return iniPath;
+        }
+
+        try
+        {
+            var lines = File.ReadAllLines(iniPath)
+                .Where(l => !l.TrimStart().StartsWith("live_master_interval=", StringComparison.OrdinalIgnoreCase))
+                .Append($"live_master_interval={interval}");
+            File.WriteAllLines(liveIniPath, lines);
+            return liveIniPath;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not write the live ini beside {Ini}; the live scan runs with the configured ini", iniPath);
+            return iniPath;
+        }
     }
 
     /// <summary>
@@ -346,6 +447,16 @@ public sealed class LiveScanCoordinator : IDisposable
         if (selfExited)
         {
             LogSelfExit(mediaPath, job, restarting: false);
+            return null;
+        }
+
+        if (job.Tracker is not null)
+        {
+            // The periodic analysis served the recording while it was in progress; its
+            // last pass is not the final word (see class remarks), the full scan is.
+            _logger.LogInformation(
+                "Live Comskip scan for {Path} ran the periodic full analysis while recording; running a full scan for the final result",
+                mediaPath);
             return null;
         }
 
@@ -514,9 +625,15 @@ public sealed class LiveScanCoordinator : IDisposable
         public void Dispose() => _gate.Release();
     }
 
-    private sealed record LiveJob(Process Process, string EdlPath, DateTime StartedUtc, OutputTail Log)
+    private sealed record LiveJob(Process Process, string EdlPath, string MasterEdlPath, DateTime StartedUtc, OutputTail Log)
     {
-        /// <summary>The last answer given for this job, so a bad read or a catch-up prefix never shrinks it.</summary>
+        /// <summary>The last answer given from the live list, so a bad read or a catch-up prefix never shrinks it.</summary>
         public IReadOnlyList<CommercialBreak>? LastBreaks { get; set; }
+
+        /// <summary>The periodic passes seen so far, once this job's Comskip has written one.</summary>
+        public LiveBreakTracker? Tracker { get; set; }
+
+        /// <summary>Write time of the last pass fed to the tracker.</summary>
+        public DateTime LastPassUtc { get; set; }
     }
 }
